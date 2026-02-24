@@ -1,0 +1,19 @@
+[package]
+name = "opendefocus-ofx-bridge"
+version = "0.1.10"
+edition = "2024"
+
+[lib]
+name = "opendefocus_ofx_bridge"
+crate-type = ["staticlib"]
+
+[dependencies]
+opendefocus = { path = "../../upstream/opendefocus/crates/opendefocus", default-features = false, features = ["std", "protobuf-vendored"] }
+opendefocus-datastructure = { path = "../../upstream/opendefocus/crates/opendefocus-datastructure", default-features = false, features = ["std", "protobuf-vendored"] }
+ndarray = "0.16"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+log = "0.4"
+env_logger = "0.11"
+
+[build-dependencies]
+cbindgen = "0.28"

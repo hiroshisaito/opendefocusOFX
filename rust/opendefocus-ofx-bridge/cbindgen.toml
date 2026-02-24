@@ -1,0 +1,10 @@
+language = "C"
+include_guard = "OPENDEFOCUS_OFX_BRIDGE_H"
+no_includes = true
+sys_includes = ["stdint.h", "stdbool.h", "stddef.h"]
+
+[enum]
+rename_variants = "ScreamingSnakeCase"
+
+[export]
+include = ["OdResult", "OdDefocusMode", "OdQuality", "OdFilterType"]

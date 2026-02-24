@@ -1,0 +1,33 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Rust
+rust/opendefocus-ofx-bridge/target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Dependencies
+node_modules/
+.env
