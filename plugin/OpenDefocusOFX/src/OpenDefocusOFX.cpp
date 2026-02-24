@@ -226,6 +226,60 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     od_set_angle(rustHandle_, static_cast<float>(angle));
     od_set_curvature(rustHandle_, static_cast<float>(curvature));
 
+    // Filter Preview: render bokeh shape at filter_resolution, centered in output
+    if (filterPreview && filterType >= 1) {
+        int fRes = filterResolution;
+        if (fRes < 32) fRes = 32;
+        if (fRes > 1024) fRes = 1024;
+
+        // Render bokeh into a small buffer
+        std::vector<float> previewBuf(static_cast<size_t>(fRes) * fRes * 4, 0.0f);
+        int32_t pFullRegion[4]   = { 0, 0, fRes, fRes };
+        int32_t pRenderRegion[4] = { 0, 0, fRes, fRes };
+
+        od_set_resolution(rustHandle_, static_cast<uint32_t>(fRes),
+                          static_cast<uint32_t>(fRes));
+        od_set_aborted(rustHandle_, false);
+
+        od_render(rustHandle_, previewBuf.data(),
+                  static_cast<uint32_t>(fRes), static_cast<uint32_t>(fRes),
+                  4, nullptr, 0, 0, pFullRegion, pRenderRegion);
+
+        // Clear output to black
+        for (int y = rw.y1; y < rw.y2; ++y) {
+            float* dstRow = static_cast<float*>(dst->getPixelAddress(rw.x1, y));
+            if (dstRow) {
+                std::memset(dstRow, 0, width * 4 * sizeof(float));
+            }
+        }
+
+        // Center-copy the preview into the output
+        int offsetX = (width  - fRes) / 2;
+        int offsetY = (height - fRes) / 2;
+
+        for (int py = 0; py < fRes; ++py) {
+            int outY = py + offsetY;
+            if (outY < 0 || outY >= height) continue;
+
+            float* dstRow = static_cast<float*>(
+                dst->getPixelAddress(rw.x1, rw.y1 + outY));
+            if (!dstRow) continue;
+
+            int copyStart = std::max(0, offsetX);
+            int srcStart  = std::max(0, -offsetX);
+            int copyEnd   = std::min(width, offsetX + fRes);
+            int copyLen   = copyEnd - copyStart;
+            if (copyLen <= 0) continue;
+
+            const float* previewRow = previewBuf.data()
+                + static_cast<size_t>(py) * fRes * 4
+                + srcStart * 4;
+            std::memcpy(dstRow + copyStart * 4, previewRow,
+                        copyLen * 4 * sizeof(float));
+        }
+        return;
+    }
+
     // Copy source pixels into contiguous buffer (OFX images may have row padding)
     std::vector<float> imageBuffer(static_cast<size_t>(width) * height * 4);
     for (int y = rw.y1; y < rw.y2; ++y) {
@@ -317,27 +371,15 @@ void OpenDefocusPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
 }
 
 void OpenDefocusPlugin::updateParamVisibility() {
+    // Samples: only enabled when Quality = Custom
     int quality = 0;
     qualityParam_->getValue(quality);
     bool isCustom = (quality == 3); // Custom
     samplesParam_->setEnabled(isCustom);
 
-    int filterType = 0;
-    filterTypeParam_->getValue(filterType);
-    bool isBokeh = (filterType >= 1); // Disc or Blade
-    bool isBlade = (filterType == 2); // Blade only
-
-    filterPreviewParam_->setEnabled(isBokeh);
-    filterResolutionParam_->setEnabled(isBokeh);
-    ringColorParam_->setEnabled(isBokeh);
-    innerColorParam_->setEnabled(isBokeh);
-    ringSizeParam_->setEnabled(isBokeh);
-    outerBlurParam_->setEnabled(isBokeh);
-    innerBlurParam_->setEnabled(isBokeh);
-    aspectRatioParam_->setEnabled(isBokeh);
-    bladesParam_->setEnabled(isBlade);
-    angleParam_->setEnabled(isBlade);
-    curvatureParam_->setEnabled(isBlade);
+    // Bokeh parameters: always enabled (matching NUKE NDK original behavior).
+    // Parameters have no visual effect when Filter Type = Simple,
+    // but remain accessible so users can configure before switching type.
 }
 
 // ---------------------------------------------------------------------------
