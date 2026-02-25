@@ -6,12 +6,33 @@
 #include <stddef.h>
 
 /**
+ * Result codes returned to C++.
+ */
+typedef enum OdResult {
+  OK = 0,
+  ERROR_NULL_POINTER = 1,
+  ERROR_INVALID_HANDLE = 2,
+  ERROR_RENDER_FAILED = 3,
+  ERROR_INIT_FAILED = 4,
+} OdResult;
+
+/**
  * Defocus operating mode.
  */
 typedef enum OdDefocusMode {
   TWO_D = 0,
   DEPTH = 1,
 } OdDefocusMode;
+
+/**
+ * Render quality preset.
+ */
+typedef enum OdQuality {
+  LOW = 0,
+  MEDIUM = 1,
+  HIGH = 2,
+  CUSTOM = 3,
+} OdQuality;
 
 /**
  * Filter type for bokeh shape.
@@ -30,27 +51,6 @@ typedef enum OdMath {
   ONE_DIVIDED_BY_Z = 1,
   REAL = 2,
 } OdMath;
-
-/**
- * Render quality preset.
- */
-typedef enum OdQuality {
-  LOW = 0,
-  MEDIUM = 1,
-  HIGH = 2,
-  CUSTOM = 3,
-} OdQuality;
-
-/**
- * Result codes returned to C++.
- */
-typedef enum OdResult {
-  OK = 0,
-  ERROR_NULL_POINTER = 1,
-  ERROR_INVALID_HANDLE = 2,
-  ERROR_RENDER_FAILED = 3,
-  ERROR_INIT_FAILED = 4,
-} OdResult;
 
 /**
  * Render result output mode.
@@ -220,6 +220,101 @@ enum OdResult od_set_size_multiplier(OdHandle handle, float multiplier);
  * Set the focal plane offset.
  */
 enum OdResult od_set_focal_plane_offset(OdHandle handle, float offset);
+
+/**
+ * Set bokeh noise size.
+ */
+enum OdResult od_set_noise_size(OdHandle handle, float size);
+
+/**
+ * Set bokeh noise intensity.
+ */
+enum OdResult od_set_noise_intensity(OdHandle handle, float value);
+
+/**
+ * Set bokeh noise seed.
+ */
+enum OdResult od_set_noise_seed(OdHandle handle, uint32_t seed);
+
+/**
+ * Set catseye enable flag.
+ */
+enum OdResult od_set_catseye_enable(OdHandle handle, bool enable);
+
+/**
+ * Set catseye amount.
+ */
+enum OdResult od_set_catseye_amount(OdHandle handle, float amount);
+
+/**
+ * Set catseye inverse flag.
+ */
+enum OdResult od_set_catseye_inverse(OdHandle handle, bool inverse);
+
+/**
+ * Set catseye inverse foreground flag.
+ */
+enum OdResult od_set_catseye_inverse_foreground(OdHandle handle, bool inv_fg);
+
+/**
+ * Set catseye gamma.
+ */
+enum OdResult od_set_catseye_gamma(OdHandle handle, float gamma);
+
+/**
+ * Set catseye softness.
+ */
+enum OdResult od_set_catseye_softness(OdHandle handle, float softness);
+
+/**
+ * Set catseye dimension based (relative to screen) flag.
+ */
+enum OdResult od_set_catseye_dimension_based(OdHandle handle, bool dim_based);
+
+/**
+ * Set barndoors enable flag.
+ */
+enum OdResult od_set_barndoors_enable(OdHandle handle, bool enable);
+
+/**
+ * Set barndoors amount.
+ */
+enum OdResult od_set_barndoors_amount(OdHandle handle, float amount);
+
+/**
+ * Set barndoors inverse flag.
+ */
+enum OdResult od_set_barndoors_inverse(OdHandle handle, bool inverse);
+
+/**
+ * Set barndoors inverse foreground flag.
+ */
+enum OdResult od_set_barndoors_inverse_foreground(OdHandle handle, bool inv_fg);
+
+/**
+ * Set barndoors gamma.
+ */
+enum OdResult od_set_barndoors_gamma(OdHandle handle, float gamma);
+
+/**
+ * Set barndoors top position.
+ */
+enum OdResult od_set_barndoors_top(OdHandle handle, float top);
+
+/**
+ * Set barndoors bottom position.
+ */
+enum OdResult od_set_barndoors_bottom(OdHandle handle, float bottom);
+
+/**
+ * Set barndoors left position.
+ */
+enum OdResult od_set_barndoors_left(OdHandle handle, float left);
+
+/**
+ * Set barndoors right position.
+ */
+enum OdResult od_set_barndoors_right(OdHandle handle, float right);
 
 /**
  * Signal or clear the abort flag for rendering.

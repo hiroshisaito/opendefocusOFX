@@ -59,6 +59,29 @@ static const char* kParamAspectRatio      = "aspectRatio";
 static const char* kParamBlades           = "blades";
 static const char* kParamAngle            = "angle";
 static const char* kParamCurvature        = "curvature";
+static const char* kParamNoiseSize        = "noiseSize";
+static const char* kParamNoiseIntensity   = "noiseIntensity";
+static const char* kParamNoiseSeed        = "noiseSeed";
+
+// Parameter names — Non-Uniform: Catseye
+static const char* kParamCatseyeEnable             = "catseyeEnable";
+static const char* kParamCatseyeAmount             = "catseyeAmount";
+static const char* kParamCatseyeInverse            = "catseyeInverse";
+static const char* kParamCatseyeInverseForeground  = "catseyeInverseForeground";
+static const char* kParamCatseyeGamma              = "catseyeGamma";
+static const char* kParamCatseyeSoftness           = "catseyeSoftness";
+static const char* kParamCatseyeDimensionBased     = "catseyeDimensionBased";
+
+// Parameter names — Non-Uniform: Barndoors
+static const char* kParamBarndoorsEnable             = "barndoorsEnable";
+static const char* kParamBarndoorsAmount             = "barndoorsAmount";
+static const char* kParamBarndoorsInverse            = "barndoorsInverse";
+static const char* kParamBarndoorsInverseForeground  = "barndoorsInverseForeground";
+static const char* kParamBarndoorsGamma              = "barndoorsGamma";
+static const char* kParamBarndoorsTop                = "barndoorsTop";
+static const char* kParamBarndoorsBottom             = "barndoorsBottom";
+static const char* kParamBarndoorsLeft               = "barndoorsLeft";
+static const char* kParamBarndoorsRight              = "barndoorsRight";
 
 // ---------------------------------------------------------------------------
 // Plugin: main ImageEffect implementation
@@ -101,6 +124,27 @@ public:
         bladesParam_           = fetchIntParam(kParamBlades);
         angleParam_            = fetchDoubleParam(kParamAngle);
         curvatureParam_        = fetchDoubleParam(kParamCurvature);
+        noiseSizeParam_        = fetchDoubleParam(kParamNoiseSize);
+        noiseIntensityParam_   = fetchDoubleParam(kParamNoiseIntensity);
+        noiseSeedParam_        = fetchIntParam(kParamNoiseSeed);
+
+        catseyeEnableParam_            = fetchBooleanParam(kParamCatseyeEnable);
+        catseyeAmountParam_            = fetchDoubleParam(kParamCatseyeAmount);
+        catseyeInverseParam_           = fetchBooleanParam(kParamCatseyeInverse);
+        catseyeInverseForegroundParam_ = fetchBooleanParam(kParamCatseyeInverseForeground);
+        catseyeGammaParam_             = fetchDoubleParam(kParamCatseyeGamma);
+        catseyeSoftnessParam_          = fetchDoubleParam(kParamCatseyeSoftness);
+        catseyeDimensionBasedParam_    = fetchBooleanParam(kParamCatseyeDimensionBased);
+
+        barndoorsEnableParam_            = fetchBooleanParam(kParamBarndoorsEnable);
+        barndoorsAmountParam_            = fetchDoubleParam(kParamBarndoorsAmount);
+        barndoorsInverseParam_           = fetchBooleanParam(kParamBarndoorsInverse);
+        barndoorsInverseForegroundParam_ = fetchBooleanParam(kParamBarndoorsInverseForeground);
+        barndoorsGammaParam_             = fetchDoubleParam(kParamBarndoorsGamma);
+        barndoorsTopParam_               = fetchDoubleParam(kParamBarndoorsTop);
+        barndoorsBottomParam_            = fetchDoubleParam(kParamBarndoorsBottom);
+        barndoorsLeftParam_              = fetchDoubleParam(kParamBarndoorsLeft);
+        barndoorsRightParam_             = fetchDoubleParam(kParamBarndoorsRight);
 
         // Initialize Rust backend
         OdResult res = od_create(&rustHandle_);
@@ -165,6 +209,29 @@ private:
     OFX::IntParam*      bladesParam_           = nullptr;
     OFX::DoubleParam*   angleParam_            = nullptr;
     OFX::DoubleParam*   curvatureParam_        = nullptr;
+    OFX::DoubleParam*   noiseSizeParam_        = nullptr;
+    OFX::DoubleParam*   noiseIntensityParam_   = nullptr;
+    OFX::IntParam*      noiseSeedParam_        = nullptr;
+
+    // Non-Uniform: Catseye
+    OFX::BooleanParam*  catseyeEnableParam_            = nullptr;
+    OFX::DoubleParam*   catseyeAmountParam_            = nullptr;
+    OFX::BooleanParam*  catseyeInverseParam_           = nullptr;
+    OFX::BooleanParam*  catseyeInverseForegroundParam_ = nullptr;
+    OFX::DoubleParam*   catseyeGammaParam_             = nullptr;
+    OFX::DoubleParam*   catseyeSoftnessParam_          = nullptr;
+    OFX::BooleanParam*  catseyeDimensionBasedParam_    = nullptr;
+
+    // Non-Uniform: Barndoors
+    OFX::BooleanParam*  barndoorsEnableParam_            = nullptr;
+    OFX::DoubleParam*   barndoorsAmountParam_            = nullptr;
+    OFX::BooleanParam*  barndoorsInverseParam_           = nullptr;
+    OFX::BooleanParam*  barndoorsInverseForegroundParam_ = nullptr;
+    OFX::DoubleParam*   barndoorsGammaParam_             = nullptr;
+    OFX::DoubleParam*   barndoorsTopParam_               = nullptr;
+    OFX::DoubleParam*   barndoorsBottomParam_            = nullptr;
+    OFX::DoubleParam*   barndoorsLeftParam_              = nullptr;
+    OFX::DoubleParam*   barndoorsRightParam_             = nullptr;
 
     OdHandle rustHandle_;
 };
@@ -240,6 +307,11 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     double angle = 0.0, curvature = 0.0;
     angleParam_->getValueAtTime(args.time, angle);
     curvatureParam_->getValueAtTime(args.time, curvature);
+    double noiseSize = 0.1, noiseIntensity = 0.25;
+    noiseSizeParam_->getValueAtTime(args.time, noiseSize);
+    noiseIntensityParam_->getValueAtTime(args.time, noiseIntensity);
+    int noiseSeed = 0;
+    noiseSeedParam_->getValueAtTime(args.time, noiseSeed);
 
     int mode = 0;
     modeParam_->getValueAtTime(args.time, mode);
@@ -281,6 +353,9 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     od_set_blades(rustHandle_, static_cast<uint32_t>(blades));
     od_set_angle(rustHandle_, static_cast<float>(angle));
     od_set_curvature(rustHandle_, static_cast<float>(curvature));
+    od_set_noise_size(rustHandle_, static_cast<float>(noiseSize));
+    od_set_noise_intensity(rustHandle_, static_cast<float>(noiseIntensity));
+    od_set_noise_seed(rustHandle_, static_cast<uint32_t>(noiseSeed));
     od_set_math(rustHandle_, static_cast<OdMath>(math));
     od_set_result_mode(rustHandle_, static_cast<OdResultMode>(renderResult));
     od_set_show_image(rustHandle_, showImage);
@@ -290,6 +365,60 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     od_set_farm_quality(rustHandle_, static_cast<OdQuality>(farmQuality));
     od_set_size_multiplier(rustHandle_, static_cast<float>(sizeMultiplier));
     od_set_focal_plane_offset(rustHandle_, static_cast<float>(focalPlaneOffset));
+
+    // Non-Uniform: Catseye
+    bool catseyeEnable = false;
+    catseyeEnableParam_->getValueAtTime(args.time, catseyeEnable);
+    double catseyeAmount = 0.5;
+    catseyeAmountParam_->getValueAtTime(args.time, catseyeAmount);
+    bool catseyeInverse = false;
+    catseyeInverseParam_->getValueAtTime(args.time, catseyeInverse);
+    bool catseyeInverseForeground = true;
+    catseyeInverseForegroundParam_->getValueAtTime(args.time, catseyeInverseForeground);
+    double catseyeGamma = 1.0;
+    catseyeGammaParam_->getValueAtTime(args.time, catseyeGamma);
+    double catseyeSoftness = 0.2;
+    catseyeSoftnessParam_->getValueAtTime(args.time, catseyeSoftness);
+    bool catseyeDimensionBased = false;
+    catseyeDimensionBasedParam_->getValueAtTime(args.time, catseyeDimensionBased);
+
+    od_set_catseye_enable(rustHandle_, catseyeEnable);
+    od_set_catseye_amount(rustHandle_, static_cast<float>(catseyeAmount));
+    od_set_catseye_inverse(rustHandle_, catseyeInverse);
+    od_set_catseye_inverse_foreground(rustHandle_, catseyeInverseForeground);
+    od_set_catseye_gamma(rustHandle_, static_cast<float>(catseyeGamma));
+    od_set_catseye_softness(rustHandle_, static_cast<float>(catseyeSoftness));
+    od_set_catseye_dimension_based(rustHandle_, catseyeDimensionBased);
+
+    // Non-Uniform: Barndoors
+    bool barndoorsEnable = false;
+    barndoorsEnableParam_->getValueAtTime(args.time, barndoorsEnable);
+    double barndoorsAmount = 0.5;
+    barndoorsAmountParam_->getValueAtTime(args.time, barndoorsAmount);
+    bool barndoorsInverse = false;
+    barndoorsInverseParam_->getValueAtTime(args.time, barndoorsInverse);
+    bool barndoorsInverseForeground = true;
+    barndoorsInverseForegroundParam_->getValueAtTime(args.time, barndoorsInverseForeground);
+    double barndoorsGamma = 1.0;
+    barndoorsGammaParam_->getValueAtTime(args.time, barndoorsGamma);
+    double barndoorsTop = 100.0;
+    barndoorsTopParam_->getValueAtTime(args.time, barndoorsTop);
+    double barndoorsBottom = 100.0;
+    barndoorsBottomParam_->getValueAtTime(args.time, barndoorsBottom);
+    double barndoorsLeft = 100.0;
+    barndoorsLeftParam_->getValueAtTime(args.time, barndoorsLeft);
+    double barndoorsRight = 100.0;
+    barndoorsRightParam_->getValueAtTime(args.time, barndoorsRight);
+
+    od_set_barndoors_enable(rustHandle_, barndoorsEnable);
+    od_set_barndoors_amount(rustHandle_, static_cast<float>(barndoorsAmount));
+    od_set_barndoors_inverse(rustHandle_, barndoorsInverse);
+    od_set_barndoors_inverse_foreground(rustHandle_, barndoorsInverseForeground);
+    od_set_barndoors_gamma(rustHandle_, static_cast<float>(barndoorsGamma));
+    od_set_barndoors_top(rustHandle_, static_cast<float>(barndoorsTop));
+    od_set_barndoors_bottom(rustHandle_, static_cast<float>(barndoorsBottom));
+    od_set_barndoors_left(rustHandle_, static_cast<float>(barndoorsLeft));
+    od_set_barndoors_right(rustHandle_, static_cast<float>(barndoorsRight));
 
     // Filter Preview: render bokeh shape at filter_resolution, centered in output
     if (filterPreview && filterType >= 1) {
@@ -431,7 +560,8 @@ bool OpenDefocusPlugin::isIdentity(const OFX::IsIdentityArguments& args,
 void OpenDefocusPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
                                       const std::string& paramName) {
     if (paramName == kParamQuality || paramName == kParamFilterType
-        || paramName == kParamMode || paramName == kParamRenderResult) {
+        || paramName == kParamMode || paramName == kParamRenderResult
+        || paramName == kParamCatseyeEnable || paramName == kParamBarndoorsEnable) {
         updateParamVisibility();
     }
 }
@@ -461,6 +591,28 @@ void OpenDefocusPlugin::updateParamVisibility() {
 
     // GammaCorrection, FarmQuality, SizeMultiplier: always enabled
     // Bokeh parameters: always enabled (matching NUKE NDK original behavior)
+
+    // Catseye: sub-params enabled only when CatseyeEnable = true
+    bool catseyeOn = false;
+    catseyeEnableParam_->getValue(catseyeOn);
+    catseyeAmountParam_->setEnabled(catseyeOn);
+    catseyeInverseParam_->setEnabled(catseyeOn);
+    catseyeInverseForegroundParam_->setEnabled(catseyeOn);
+    catseyeGammaParam_->setEnabled(catseyeOn);
+    catseyeSoftnessParam_->setEnabled(catseyeOn);
+    catseyeDimensionBasedParam_->setEnabled(catseyeOn);
+
+    // Barndoors: sub-params enabled only when BarndoorsEnable = true
+    bool barndoorsOn = false;
+    barndoorsEnableParam_->getValue(barndoorsOn);
+    barndoorsAmountParam_->setEnabled(barndoorsOn);
+    barndoorsInverseParam_->setEnabled(barndoorsOn);
+    barndoorsInverseForegroundParam_->setEnabled(barndoorsOn);
+    barndoorsGammaParam_->setEnabled(barndoorsOn);
+    barndoorsTopParam_->setEnabled(barndoorsOn);
+    barndoorsBottomParam_->setEnabled(barndoorsOn);
+    barndoorsLeftParam_->setEnabled(barndoorsOn);
+    barndoorsRightParam_->setEnabled(barndoorsOn);
 }
 
 // ---------------------------------------------------------------------------
@@ -842,6 +994,215 @@ void OpenDefocusPluginFactory::describeInContext(
         param->setDisplayRange(-1.0, 1.0);
         param->setDoubleType(OFX::eDoubleTypePlain);
         if (bokehPage) bokehPage->addChild(*param);
+    }
+
+    // Noise Size
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamNoiseSize);
+        param->setLabels("Noise Size", "Noise Size", "Noise Size");
+        param->setHint("Size of the bokeh noise pattern");
+        param->setDefault(0.1);
+        param->setRange(0.0, 1.0);
+        param->setDisplayRange(0.0, 1.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (bokehPage) bokehPage->addChild(*param);
+    }
+
+    // Noise Intensity
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamNoiseIntensity);
+        param->setLabels("Noise Intensity", "Noise Intensity", "Noise Intensity");
+        param->setHint("Intensity of the bokeh noise pattern");
+        param->setDefault(0.25);
+        param->setRange(0.0, 1.0);
+        param->setDisplayRange(0.0, 1.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (bokehPage) bokehPage->addChild(*param);
+    }
+
+    // Noise Seed
+    {
+        OFX::IntParamDescriptor* param = desc.defineIntParam(kParamNoiseSeed);
+        param->setLabels("Noise Seed", "Noise Seed", "Noise Seed");
+        param->setHint("Random seed for the bokeh noise pattern");
+        param->setDefault(0);
+        param->setRange(0, 10000);
+        param->setDisplayRange(0, 1000);
+        if (bokehPage) bokehPage->addChild(*param);
+    }
+
+    // --- Non-Uniform Page ---
+    OFX::PageParamDescriptor* nonUniformPage = desc.definePageParam("Non-Uniform");
+
+    // Catseye Enable
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamCatseyeEnable);
+        param->setLabels("Catseye Enable", "Catseye Enable", "Catseye Enable");
+        param->setHint("Enable catseye (optical vignetting) effect");
+        param->setDefault(false);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Catseye Amount
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamCatseyeAmount);
+        param->setLabels("Catseye Amount", "Catseye Amount", "Catseye Amount");
+        param->setHint("Strength of the catseye effect");
+        param->setDefault(0.5);
+        param->setRange(0.0, 2.0);
+        param->setDisplayRange(0.0, 2.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Catseye Inverse
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamCatseyeInverse);
+        param->setLabels("Catseye Inverse", "Catseye Inverse", "Catseye Inverse");
+        param->setHint("Invert the catseye gradient direction");
+        param->setDefault(false);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Catseye Inverse Foreground
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamCatseyeInverseForeground);
+        param->setLabels("Catseye Inverse Foreground", "Catseye Inverse Foreground", "Catseye Inverse Foreground");
+        param->setHint("Apply catseye inverse to foreground defocus");
+        param->setDefault(true);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Catseye Gamma
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamCatseyeGamma);
+        param->setLabels("Catseye Gamma", "Catseye Gamma", "Catseye Gamma");
+        param->setHint("Gamma curve for the catseye falloff");
+        param->setDefault(1.0);
+        param->setRange(0.2, 4.0);
+        param->setDisplayRange(0.2, 4.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Catseye Softness
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamCatseyeSoftness);
+        param->setLabels("Catseye Softness", "Catseye Softness", "Catseye Softness");
+        param->setHint("Softness of the catseye transition");
+        param->setDefault(0.2);
+        param->setRange(0.01, 1.0);
+        param->setDisplayRange(0.01, 1.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Catseye Dimension Based
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamCatseyeDimensionBased);
+        param->setLabels("Catseye Dimension Based", "Catseye Dimension Based", "Catseye Dimension Based");
+        param->setHint("Use screen dimensions for catseye calculation");
+        param->setDefault(false);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Enable
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamBarndoorsEnable);
+        param->setLabels("Barndoors Enable", "Barndoors Enable", "Barndoors Enable");
+        param->setHint("Enable barndoors effect for edge defocus control");
+        param->setDefault(false);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Amount
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamBarndoorsAmount);
+        param->setLabels("Barndoors Amount", "Barndoors Amount", "Barndoors Amount");
+        param->setHint("Strength of the barndoors effect");
+        param->setDefault(0.5);
+        param->setRange(0.0, 2.0);
+        param->setDisplayRange(0.0, 2.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Inverse
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamBarndoorsInverse);
+        param->setLabels("Barndoors Inverse", "Barndoors Inverse", "Barndoors Inverse");
+        param->setHint("Invert the barndoors gradient direction");
+        param->setDefault(false);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Inverse Foreground
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamBarndoorsInverseForeground);
+        param->setLabels("Barndoors Inverse Foreground", "Barndoors Inverse Foreground", "Barndoors Inverse Foreground");
+        param->setHint("Apply barndoors inverse to foreground defocus");
+        param->setDefault(true);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Gamma
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamBarndoorsGamma);
+        param->setLabels("Barndoors Gamma", "Barndoors Gamma", "Barndoors Gamma");
+        param->setHint("Gamma curve for the barndoors falloff");
+        param->setDefault(1.0);
+        param->setRange(0.2, 4.0);
+        param->setDisplayRange(0.2, 4.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Top
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamBarndoorsTop);
+        param->setLabels("Barndoors Top", "Barndoors Top", "Barndoors Top");
+        param->setHint("Top barndoor position (percentage)");
+        param->setDefault(100.0);
+        param->setRange(0.0, 100.0);
+        param->setDisplayRange(0.0, 100.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Bottom
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamBarndoorsBottom);
+        param->setLabels("Barndoors Bottom", "Barndoors Bottom", "Barndoors Bottom");
+        param->setHint("Bottom barndoor position (percentage)");
+        param->setDefault(100.0);
+        param->setRange(0.0, 100.0);
+        param->setDisplayRange(0.0, 100.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Left
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamBarndoorsLeft);
+        param->setLabels("Barndoors Left", "Barndoors Left", "Barndoors Left");
+        param->setHint("Left barndoor position (percentage)");
+        param->setDefault(100.0);
+        param->setRange(0.0, 100.0);
+        param->setDisplayRange(0.0, 100.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
+    }
+
+    // Barndoors Right
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamBarndoorsRight);
+        param->setLabels("Barndoors Right", "Barndoors Right", "Barndoors Right");
+        param->setHint("Right barndoor position (percentage)");
+        param->setDefault(100.0);
+        param->setRange(0.0, 100.0);
+        param->setDisplayRange(0.0, 100.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (nonUniformPage) nonUniformPage->addChild(*param);
     }
 }
 

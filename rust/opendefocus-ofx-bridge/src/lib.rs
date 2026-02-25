@@ -545,6 +545,246 @@ pub unsafe extern "C" fn od_set_focal_plane_offset(handle: OdHandle, offset: f32
 }
 
 // ---------------------------------------------------------------------------
+// Bokeh Noise
+// ---------------------------------------------------------------------------
+
+/// Set bokeh noise size.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_noise_size(handle: OdHandle, size: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.bokeh.noise.size = size;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set bokeh noise intensity.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_noise_intensity(handle: OdHandle, value: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.bokeh.noise.intensity = value;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set bokeh noise seed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_noise_seed(handle: OdHandle, seed: u32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.bokeh.noise.seed = seed;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Non-uniform: Catseye
+// ---------------------------------------------------------------------------
+
+/// Set catseye enable flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_catseye_enable(handle: OdHandle, enable: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.catseye.enable = enable;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set catseye amount.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_catseye_amount(handle: OdHandle, amount: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.catseye.amount = amount;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set catseye inverse flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_catseye_inverse(handle: OdHandle, inverse: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.catseye.inverse = inverse;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set catseye inverse foreground flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_catseye_inverse_foreground(handle: OdHandle, inv_fg: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.catseye.inverse_foreground = inv_fg;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set catseye gamma.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_catseye_gamma(handle: OdHandle, gamma: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.catseye.gamma = gamma;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set catseye softness.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_catseye_softness(handle: OdHandle, softness: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.catseye.softness = softness;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set catseye dimension based (relative to screen) flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_catseye_dimension_based(handle: OdHandle, dim_based: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.catseye.relative_to_screen = dim_based;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Non-uniform: Barndoors
+// ---------------------------------------------------------------------------
+
+/// Set barndoors enable flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_enable(handle: OdHandle, enable: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.enable = enable;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors amount.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_amount(handle: OdHandle, amount: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.amount = amount;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors inverse flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_inverse(handle: OdHandle, inverse: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.inverse = inverse;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors inverse foreground flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_inverse_foreground(handle: OdHandle, inv_fg: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.inverse_foreground = inv_fg;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors gamma.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_gamma(handle: OdHandle, gamma: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.gamma = gamma;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors top position.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_top(handle: OdHandle, top: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.top = top;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors bottom position.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_bottom(handle: OdHandle, bottom: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.bottom = bottom;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors left position.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_left(handle: OdHandle, left: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.left = left;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set barndoors right position.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_barndoors_right(handle: OdHandle, right: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.barndoors.right = right;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Abort
 // ---------------------------------------------------------------------------
 
