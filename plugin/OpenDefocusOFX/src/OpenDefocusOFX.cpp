@@ -34,6 +34,18 @@ static const char* kParamFocusPlane = "focusPlane";
 static const char* kParamQuality    = "quality";
 static const char* kParamSamples    = "samples";
 
+// Parameter names — Defocus / Advanced
+static const char* kParamMode              = "mode";
+static const char* kParamMath              = "math";
+static const char* kParamRenderResult      = "renderResult";
+static const char* kParamShowImage         = "showImage";
+static const char* kParamProtect           = "protect";
+static const char* kParamMaxSize           = "maxSize";
+static const char* kParamGammaCorrection   = "gammaCorrection";
+static const char* kParamFarmQuality       = "farmQuality";
+static const char* kParamSizeMultiplier    = "sizeMultiplier";
+static const char* kParamFocalPlaneOffset  = "focalPlaneOffset";
+
 // Parameter names — Bokeh
 static const char* kParamFilterType       = "filterType";
 static const char* kParamFilterPreview    = "filterPreview";
@@ -65,6 +77,17 @@ public:
         focusPlaneParam_ = fetchDoubleParam(kParamFocusPlane);
         qualityParam_    = fetchChoiceParam(kParamQuality);
         samplesParam_    = fetchIntParam(kParamSamples);
+
+        modeParam_             = fetchChoiceParam(kParamMode);
+        mathParam_             = fetchChoiceParam(kParamMath);
+        renderResultParam_     = fetchChoiceParam(kParamRenderResult);
+        showImageParam_        = fetchBooleanParam(kParamShowImage);
+        protectParam_          = fetchDoubleParam(kParamProtect);
+        maxSizeParam_          = fetchDoubleParam(kParamMaxSize);
+        gammaCorrectionParam_  = fetchDoubleParam(kParamGammaCorrection);
+        farmQualityParam_      = fetchChoiceParam(kParamFarmQuality);
+        sizeMultiplierParam_   = fetchDoubleParam(kParamSizeMultiplier);
+        focalPlaneOffsetParam_ = fetchDoubleParam(kParamFocalPlaneOffset);
 
         filterTypeParam_       = fetchChoiceParam(kParamFilterType);
         filterPreviewParam_    = fetchBooleanParam(kParamFilterPreview);
@@ -116,6 +139,18 @@ private:
     OFX::DoubleParam* focusPlaneParam_ = nullptr;
     OFX::ChoiceParam* qualityParam_    = nullptr;
     OFX::IntParam*    samplesParam_    = nullptr;
+
+    // Defocus / Advanced
+    OFX::ChoiceParam*   modeParam_             = nullptr;
+    OFX::ChoiceParam*   mathParam_             = nullptr;
+    OFX::ChoiceParam*   renderResultParam_     = nullptr;
+    OFX::BooleanParam*  showImageParam_        = nullptr;
+    OFX::DoubleParam*   protectParam_          = nullptr;
+    OFX::DoubleParam*   maxSizeParam_          = nullptr;
+    OFX::DoubleParam*   gammaCorrectionParam_  = nullptr;
+    OFX::ChoiceParam*   farmQualityParam_      = nullptr;
+    OFX::DoubleParam*   sizeMultiplierParam_   = nullptr;
+    OFX::DoubleParam*   focalPlaneOffsetParam_ = nullptr;
 
     // Bokeh
     OFX::ChoiceParam*   filterTypeParam_       = nullptr;
@@ -206,6 +241,27 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     angleParam_->getValueAtTime(args.time, angle);
     curvatureParam_->getValueAtTime(args.time, curvature);
 
+    int mode = 0;
+    modeParam_->getValueAtTime(args.time, mode);
+    int math = 0;
+    mathParam_->getValueAtTime(args.time, math);
+    int renderResult = 0;
+    renderResultParam_->getValueAtTime(args.time, renderResult);
+    bool showImage = false;
+    showImageParam_->getValueAtTime(args.time, showImage);
+    double protect = 0.0;
+    protectParam_->getValueAtTime(args.time, protect);
+    double maxSize = 10.0;
+    maxSizeParam_->getValueAtTime(args.time, maxSize);
+    double gammaCorrection = 1.0;
+    gammaCorrectionParam_->getValueAtTime(args.time, gammaCorrection);
+    int farmQuality = 2;
+    farmQualityParam_->getValueAtTime(args.time, farmQuality);
+    double sizeMultiplier = 1.0;
+    sizeMultiplierParam_->getValueAtTime(args.time, sizeMultiplier);
+    double focalPlaneOffset = 0.0;
+    focalPlaneOffsetParam_->getValueAtTime(args.time, focalPlaneOffset);
+
     // Configure Rust settings
     od_set_size(rustHandle_, static_cast<float>(size));
     od_set_focus_plane(rustHandle_, static_cast<float>(focusPlane));
@@ -225,6 +281,15 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     od_set_blades(rustHandle_, static_cast<uint32_t>(blades));
     od_set_angle(rustHandle_, static_cast<float>(angle));
     od_set_curvature(rustHandle_, static_cast<float>(curvature));
+    od_set_math(rustHandle_, static_cast<OdMath>(math));
+    od_set_result_mode(rustHandle_, static_cast<OdResultMode>(renderResult));
+    od_set_show_image(rustHandle_, showImage);
+    od_set_protect(rustHandle_, static_cast<float>(protect));
+    od_set_max_size(rustHandle_, static_cast<float>(maxSize));
+    od_set_gamma_correction(rustHandle_, static_cast<float>(gammaCorrection));
+    od_set_farm_quality(rustHandle_, static_cast<OdQuality>(farmQuality));
+    od_set_size_multiplier(rustHandle_, static_cast<float>(sizeMultiplier));
+    od_set_focal_plane_offset(rustHandle_, static_cast<float>(focalPlaneOffset));
 
     // Filter Preview: render bokeh shape at filter_resolution, centered in output
     if (filterPreview && filterType >= 1) {
@@ -295,7 +360,9 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     uint32_t depthW = 0, depthH = 0;
     std::vector<float> depthBuffer;
 
-    if (depth) {
+    // Mode=Depth(1) and depth clip connected → DEPTH; otherwise → TWO_D
+    bool useDepth = (mode == 1) && depth;
+    if (useDepth) {
         depthBuffer.resize(static_cast<size_t>(width) * height);
         OFX::PixelComponentEnum depthComp = depth->getPixelComponents();
         int depthStride = (depthComp == OFX::ePixelComponentRGBA) ? 4 : 1;
@@ -313,10 +380,8 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
         depthPtr = depthBuffer.data();
         depthW = static_cast<uint32_t>(width);
         depthH = static_cast<uint32_t>(height);
-        od_set_defocus_mode(rustHandle_, DEPTH);
-    } else {
-        od_set_defocus_mode(rustHandle_, TWO_D);
     }
+    od_set_defocus_mode(rustHandle_, useDepth ? DEPTH : TWO_D);
 
     // Regions
     int32_t fullRegion[4]   = { 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
@@ -365,7 +430,8 @@ bool OpenDefocusPlugin::isIdentity(const OFX::IsIdentityArguments& args,
 
 void OpenDefocusPlugin::changedParam(const OFX::InstanceChangedArgs& /*args*/,
                                       const std::string& paramName) {
-    if (paramName == kParamQuality || paramName == kParamFilterType) {
+    if (paramName == kParamQuality || paramName == kParamFilterType
+        || paramName == kParamMode || paramName == kParamRenderResult) {
         updateParamVisibility();
     }
 }
@@ -377,9 +443,24 @@ void OpenDefocusPlugin::updateParamVisibility() {
     bool isCustom = (quality == 3); // Custom
     samplesParam_->setEnabled(isCustom);
 
-    // Bokeh parameters: always enabled (matching NUKE NDK original behavior).
-    // Parameters have no visual effect when Filter Type = Simple,
-    // but remain accessible so users can configure before switching type.
+    // Mode-dependent parameters: only enabled when Mode = Depth
+    int mode = 0;
+    modeParam_->getValue(mode);
+    bool isDepth = (mode == 1);
+    mathParam_->setEnabled(isDepth);
+    renderResultParam_->setEnabled(isDepth);
+    protectParam_->setEnabled(isDepth);
+    maxSizeParam_->setEnabled(isDepth);
+    focalPlaneOffsetParam_->setEnabled(isDepth);
+
+    // ShowImage: only enabled when Mode = Depth AND RenderResult = FocalPlaneSetup
+    int renderResult = 0;
+    renderResultParam_->getValue(renderResult);
+    bool isFocalPlaneSetup = isDepth && (renderResult == 1);
+    showImageParam_->setEnabled(isFocalPlaneSetup);
+
+    // GammaCorrection, FarmQuality, SizeMultiplier: always enabled
+    // Bokeh parameters: always enabled (matching NUKE NDK original behavior)
 }
 
 // ---------------------------------------------------------------------------
@@ -500,6 +581,125 @@ void OpenDefocusPluginFactory::describeInContext(
         param->setRange(1, 256);
         param->setDisplayRange(1, 128);
         if (page) page->addChild(*param);
+    }
+
+    // Mode (2D / Depth)
+    {
+        OFX::ChoiceParamDescriptor* param = desc.defineChoiceParam(kParamMode);
+        param->setLabels("Mode", "Mode", "Mode");
+        param->setHint("Defocus operating mode");
+        param->appendOption("2D");
+        param->appendOption("Depth");
+        param->setDefault(0);
+        if (page) page->addChild(*param);
+    }
+
+    // Math (Direct / 1÷Z / Real)
+    {
+        OFX::ChoiceParamDescriptor* param = desc.defineChoiceParam(kParamMath);
+        param->setLabels("Math", "Math", "Math");
+        param->setHint("Depth math interpretation mode");
+        param->appendOption("Direct");
+        param->appendOption("1/Z");
+        param->appendOption("Real");
+        param->setDefault(1);
+        if (page) page->addChild(*param);
+    }
+
+    // Render Result
+    {
+        OFX::ChoiceParamDescriptor* param = desc.defineChoiceParam(kParamRenderResult);
+        param->setLabels("Render Result", "Render Result", "Render Result");
+        param->setHint("Render output mode");
+        param->appendOption("Result");
+        param->appendOption("Focal Plane Setup");
+        param->setDefault(0);
+        if (page) page->addChild(*param);
+    }
+
+    // Show Image
+    {
+        OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamShowImage);
+        param->setLabels("Show Image", "Show Image", "Show Image");
+        param->setHint("Overlay source image in Focal Plane Setup mode");
+        param->setDefault(false);
+        if (page) page->addChild(*param);
+    }
+
+    // Protect
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamProtect);
+        param->setLabels("Protect", "Protect", "Protect");
+        param->setHint("Focal plane protection range");
+        param->setDefault(0.0);
+        param->setRange(0.0, 10000.0);
+        param->setDisplayRange(0.0, 100.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (page) page->addChild(*param);
+    }
+
+    // Maximum Size
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamMaxSize);
+        param->setLabels("Maximum Size", "Maximum Size", "Maximum Size");
+        param->setHint("Maximum defocus radius");
+        param->setDefault(10.0);
+        param->setRange(0.0, 500.0);
+        param->setDisplayRange(0.0, 100.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (page) page->addChild(*param);
+    }
+
+    // Gamma Correction
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamGammaCorrection);
+        param->setLabels("Gamma Correction", "Gamma Correction", "Gamma Correction");
+        param->setHint("Gamma correction for bokeh intensities");
+        param->setDefault(1.0);
+        param->setRange(0.2, 5.0);
+        param->setDisplayRange(0.2, 5.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (page) page->addChild(*param);
+    }
+
+    // Farm Quality
+    {
+        OFX::ChoiceParamDescriptor* param = desc.defineChoiceParam(kParamFarmQuality);
+        param->setLabels("Farm Quality", "Farm Quality", "Farm Quality");
+        param->setHint("Quality preset for farm/batch rendering");
+        param->appendOption("Low");
+        param->appendOption("Medium");
+        param->appendOption("High");
+        param->appendOption("Custom");
+        param->setDefault(2);
+        if (page) page->addChild(*param);
+    }
+
+    // --- Advanced Page ---
+    OFX::PageParamDescriptor* advancedPage = desc.definePageParam("Advanced");
+
+    // Size Multiplier
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamSizeMultiplier);
+        param->setLabels("Size Multiplier", "Size Multiplier", "Size Multiplier");
+        param->setHint("Multiplier applied to all defocus radii");
+        param->setDefault(1.0);
+        param->setRange(0.0, 2.0);
+        param->setDisplayRange(0.0, 2.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (advancedPage) advancedPage->addChild(*param);
+    }
+
+    // Focal Plane Offset
+    {
+        OFX::DoubleParamDescriptor* param = desc.defineDoubleParam(kParamFocalPlaneOffset);
+        param->setLabels("Focal Plane Offset", "Focal Plane Offset", "Focal Plane Offset");
+        param->setHint("Offset applied to focal plane distance");
+        param->setDefault(0.0);
+        param->setRange(-5.0, 5.0);
+        param->setDisplayRange(-5.0, 5.0);
+        param->setDoubleType(OFX::eDoubleTypePlain);
+        if (advancedPage) advancedPage->addChild(*param);
     }
 
     // --- Bokeh Page ---

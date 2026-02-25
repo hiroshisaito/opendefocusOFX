@@ -23,6 +23,15 @@ typedef enum OdFilterType {
 } OdFilterType;
 
 /**
+ * Depth math interpretation mode.
+ */
+typedef enum OdMath {
+  DIRECT = 0,
+  ONE_DIVIDED_BY_Z = 1,
+  REAL = 2,
+} OdMath;
+
+/**
  * Render quality preset.
  */
 typedef enum OdQuality {
@@ -42,6 +51,14 @@ typedef enum OdResult {
   ERROR_RENDER_FAILED = 3,
   ERROR_INIT_FAILED = 4,
 } OdResult;
+
+/**
+ * Render result output mode.
+ */
+typedef enum OdResultMode {
+  RESULT = 0,
+  FOCAL_PLANE_SETUP = 1,
+} OdResultMode;
 
 /**
  * Opaque handle to an OpenDefocus instance.
@@ -153,6 +170,56 @@ enum OdResult od_set_angle(OdHandle handle, float angle);
  * Set aperture blade curvature.
  */
 enum OdResult od_set_curvature(OdHandle handle, float curvature);
+
+/**
+ * Set the depth math mode.
+ *
+ * Maps to two internal fields:
+ * - Direct: use_direct_math = true
+ * - OneDividedByZ: use_direct_math = false + circle_of_confusion.math = OneDividedByZ
+ * - Real: use_direct_math = false + circle_of_confusion.math = Real
+ */
+enum OdResult od_set_math(OdHandle handle, enum OdMath math);
+
+/**
+ * Set the render result mode (Result or FocalPlaneSetup).
+ */
+enum OdResult od_set_result_mode(OdHandle handle, enum OdResultMode mode);
+
+/**
+ * Set whether to show the source image overlay (FocalPlaneSetup mode).
+ */
+enum OdResult od_set_show_image(OdHandle handle, bool show);
+
+/**
+ * Set the focal plane protection range.
+ */
+enum OdResult od_set_protect(OdHandle handle, float protect);
+
+/**
+ * Set the maximum defocus radius.
+ */
+enum OdResult od_set_max_size(OdHandle handle, float max_size);
+
+/**
+ * Set the gamma correction for bokeh intensities.
+ */
+enum OdResult od_set_gamma_correction(OdHandle handle, float gamma);
+
+/**
+ * Set the farm/batch render quality preset.
+ */
+enum OdResult od_set_farm_quality(OdHandle handle, enum OdQuality quality);
+
+/**
+ * Set the size multiplier applied to all defocus radii.
+ */
+enum OdResult od_set_size_multiplier(OdHandle handle, float multiplier);
+
+/**
+ * Set the focal plane offset.
+ */
+enum OdResult od_set_focal_plane_offset(OdHandle handle, float offset);
 
 /**
  * Signal or clear the abort flag for rendering.

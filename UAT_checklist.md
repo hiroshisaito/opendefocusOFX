@@ -139,14 +139,55 @@
 | 12.3 | Curvature を変更すると Bokeh 辺の曲率が変化する | PASS | Blade 時 |
 | 12.4 | Filter Type=Disc の時、Blades/Angle/Curvature が無効 (グレーアウト) になる | N/A | 10.6 の修正に伴いグレーアウト廃止 (NUKE NDK 準拠)。パラメータは常に有効 |
 
-## 13. 既知の制約（本バージョンでは対象外）
+## 13. Defocus 一般パラメータ (Phase 4)
+
+| # | テスト項目 | 合否 | 備考 |
+|---|-----------|------|------|
+| 13.1 | Mode パラメータが UI に表示される (2D/Depth) | | デフォルト: 2D |
+| 13.2 | Mode=2D で Depth 未接続と同等の均一 defocus が適用される | | Depth 接続の有無に関わらず |
+| 13.3 | Mode=Depth + Depth 接続で深度ベースの defocus が適用される | | |
+| 13.4 | Mode=Depth + Depth 未接続で 2D フォールバックされる | | エラーにならないこと |
+| 13.5 | Math パラメータが UI に表示される (Direct/1÷Z/Real) | | デフォルト: 1/Z |
+| 13.6 | Math を変更するとレンダリング結果が変化する | | Mode=Depth 時 |
+| 13.7 | Render Result パラメータが UI に表示される (Result/Focal Plane Setup) | | デフォルト: Result |
+| 13.8 | Render Result=Focal Plane Setup で焦点面の視覚化が出力される | | Mode=Depth 時 |
+| 13.9 | Show Image=true でソース画像がオーバーレイ表示される | | RenderResult=Focal Plane Setup 時 |
+| 13.10 | Protect を変更すると焦点面の保護範囲が変化する | | Mode=Depth 時 |
+| 13.11 | Maximum Size を変更すると最大 defocus 半径が制限される | | Mode=Depth 時 |
+| 13.12 | Gamma Correction を変更すると Bokeh の明暗バランスが変化する | | |
+| 13.13 | Farm Quality パラメータが UI に表示される (Low/Medium/High/Custom) | | デフォルト: High |
+
+## 14. Defocus — 条件付き有効/無効 (Phase 4)
+
+| # | テスト項目 | 合否 | 備考 |
+|---|-----------|------|------|
+| 14.1 | Mode=2D の時、Math/RenderResult/Protect/MaxSize/FocalPlaneOffset がグレーアウトする | | |
+| 14.2 | Mode=Depth の時、上記パラメータが有効になる | | |
+| 14.3 | Mode=Depth + RenderResult=Result の時、ShowImage がグレーアウトする | | |
+| 14.4 | Mode=Depth + RenderResult=Focal Plane Setup の時、ShowImage が有効になる | | |
+| 14.5 | GammaCorrection, FarmQuality, SizeMultiplier は Mode に関わらず常に有効 | | |
+
+## 15. Advanced パラメータ (Phase 4)
+
+| # | テスト項目 | 合否 | 備考 |
+|---|-----------|------|------|
+| 15.1 | Advanced ページが UI に表示される | | Controls, Bokeh と別ページ |
+| 15.2 | Size Multiplier パラメータが UI に表示される | | デフォルト: 1.0, 範囲: 0–2 |
+| 15.3 | Size Multiplier を変更すると defocus サイズが倍率変化する | | |
+| 15.4 | Focal Plane Offset パラメータが UI に表示される | | デフォルト: 0.0, 範囲: -5–5 |
+| 15.5 | Focal Plane Offset を変更すると焦点面がオフセットされる | | Mode=Depth 時 |
+
+## 16. 既知の制約（本バージョンでは対象外）
 
 以下は v0.1.10-OFX-v1 では未実装であり、テスト対象外:
 
 - タイリング / ROI 拡張（`setSupportsTiles(false)`）
 - GPU レンダリング（CPU のみ）
 - カスタム Bokeh 画像（Image フィルタタイプ / Filter 入力クリップ未実装）
-- 残り 50+ の詳細パラメータ（将来フェーズで段階的追加）
+- Camera モード（Camera 入力クリップ + camera_data パラメータ群）
+- Non-uniform エフェクト（Catseye, Barndoors, Astigmatism, Axial Aberration）
+- Bokeh Noise パラメータ（noise_size, noise_intensity, noise_seed）
+- 残りの詳細パラメータ（将来フェーズで段階的追加）
 
 ---
 

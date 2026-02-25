@@ -6,7 +6,7 @@
 use std::ffi::c_void;
 
 use ndarray::{Array2, ArrayViewMut3};
-use opendefocus::datamodel::{self, bokeh_creator, render::FilterMode};
+use opendefocus::datamodel::{self, bokeh_creator, circle_of_confusion, render::FilterMode};
 
 // ---------------------------------------------------------------------------
 // C-facing types
@@ -47,6 +47,21 @@ pub enum OdFilterType {
     Simple = 0,
     Disc = 1,
     Blade = 2,
+}
+
+/// Depth math interpretation mode.
+#[repr(C)]
+pub enum OdMath {
+    Direct = 0,
+    OneDividedByZ = 1,
+    Real = 2,
+}
+
+/// Render result output mode.
+#[repr(C)]
+pub enum OdResultMode {
+    Result = 0,
+    FocalPlaneSetup = 1,
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +393,151 @@ pub unsafe extern "C" fn od_set_curvature(handle: OdHandle, curvature: f32) -> O
     match unsafe { get_instance(handle) } {
         Some(inst) => {
             inst.settings.bokeh.curvature = curvature;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Defocus / Advanced settings
+// ---------------------------------------------------------------------------
+
+/// Set the depth math mode.
+///
+/// Maps to two internal fields:
+/// - Direct: use_direct_math = true
+/// - OneDividedByZ: use_direct_math = false + circle_of_confusion.math = OneDividedByZ
+/// - Real: use_direct_math = false + circle_of_confusion.math = Real
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_math(handle: OdHandle, math: OdMath) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            match math {
+                OdMath::Direct => {
+                    inst.settings.defocus.use_direct_math = true;
+                }
+                OdMath::OneDividedByZ => {
+                    inst.settings.defocus.use_direct_math = false;
+                    inst.settings
+                        .defocus
+                        .circle_of_confusion
+                        .set_math(circle_of_confusion::Math::OneDividedByZ);
+                }
+                OdMath::Real => {
+                    inst.settings.defocus.use_direct_math = false;
+                    inst.settings
+                        .defocus
+                        .circle_of_confusion
+                        .set_math(circle_of_confusion::Math::Real);
+                }
+            }
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set the render result mode (Result or FocalPlaneSetup).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_result_mode(handle: OdHandle, mode: OdResultMode) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            let rm = match mode {
+                OdResultMode::Result => datamodel::render::ResultMode::Result,
+                OdResultMode::FocalPlaneSetup => datamodel::render::ResultMode::FocalPlaneSetup,
+            };
+            inst.settings.render.set_result_mode(rm);
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set whether to show the source image overlay (FocalPlaneSetup mode).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_show_image(handle: OdHandle, show: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.defocus.show_image = show;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set the focal plane protection range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_protect(handle: OdHandle, protect: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.defocus.circle_of_confusion.protect = protect;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set the maximum defocus radius.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_max_size(handle: OdHandle, max_size: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.defocus.circle_of_confusion.max_size = max_size;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set the gamma correction for bokeh intensities.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_gamma_correction(handle: OdHandle, gamma: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.defocus.gamma_correction = gamma;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set the farm/batch render quality preset.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_farm_quality(handle: OdHandle, quality: OdQuality) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            let q = match quality {
+                OdQuality::Low => datamodel::render::Quality::Low,
+                OdQuality::Medium => datamodel::render::Quality::Medium,
+                OdQuality::High => datamodel::render::Quality::High,
+                OdQuality::Custom => datamodel::render::Quality::Custom,
+            };
+            inst.settings.render.set_farm_quality(q);
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set the size multiplier applied to all defocus radii.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_size_multiplier(handle: OdHandle, multiplier: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.defocus.size_multiplier = multiplier;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set the focal plane offset.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_focal_plane_offset(handle: OdHandle, offset: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.defocus.focal_plane_offset = offset;
             OdResult::Ok
         }
         None => OdResult::ErrorNullPointer,

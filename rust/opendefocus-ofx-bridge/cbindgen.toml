@@ -7,4 +7,4 @@ sys_includes = ["stdint.h", "stdbool.h", "stddef.h"]
 rename_variants = "ScreamingSnakeCase"
 
 [export]
-include = ["OdResult", "OdDefocusMode", "OdQuality", "OdFilterType"]
+include = ["OdResult", "OdDefocusMode", "OdQuality", "OdFilterType", "OdMath", "OdResultMode"]
