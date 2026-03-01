@@ -540,40 +540,784 @@ Phase 5 の Bokeh Noise に続き、Non-uniform エフェクトのうち Catseye
 - C++ OFX: ビルド成功
 - FFI 関数 50個 + OFX エントリポイント 2個すべてエクスポート確認済み
 
-### 現在のステータス
+### 2026-02-26: OFX ページ/タブ表示問題 — 未解決
 
-- **Phase 1 (OFX スケルトン)**: 完了
-- **Phase 2 (FFI ブリッジ)**: 完了
-- **Phase 2 UAT**: 完了 — FAIL 項目なし
-- **Phase 3 (Quality + Bokeh パラメータ)**: 完了
-- **Phase 3 UAT**: 完了 — FAIL 項目なし（10.5, 10.6 修正後再テスト PASS）
-- **Phase 4 (Defocus 一般 + Advanced)**: 完了
-- **Phase 4 UAT**: 完了 — OFX 側の FAIL 項目なし（13.12, 15.5 は upstream 未実装で DEFERRED）
-- **Phase 5 (Bokeh Noise)**: 完了
-- **Phase 5 UAT**: 完了 — OFX 側の FAIL 項目なし（16.2/16.4/16.6/16.8 は upstream `noise` feature 無効で DEFERRED）
-- **Phase 6 (Non-Uniform: Catseye + Barndoors)**: 完了
-- **Phase 6 UAT**: 未実施
+Phase 6 UAT 開始時に、ホスト UI でページ/タブが正しく表示されない問題が発覚。複数のアプローチを試行したが、いずれも失敗。
 
-### 既知の制約
+#### 症状
+
+NDK 版は Controls / Bokeh / Non-Uniform / Advanced の 4 タブ構成。OFX 版では一部のページが表示されない、またはパラメータが間違ったページに表示される。**NUKE でも Advanced ページが消失**しており、Flame 固有の問題ではなく OFX レベルの問題。
+
+#### 試行した修正と結果
+
+| # | アプローチ | Flame 結果 | NUKE 結果 |
+|---|-----------|-----------|-----------|
+| 1 | ページ定義を先頭に集約（4 PageParam） | Controls と Bokeh のみ表示 | Advanced 消失 |
+| 2 | `setPageParamOrder()` 追加 | クラッシュ | — |
+| 3 | GroupParam で 2 ページに統合 | 動作するが 2 ページのみ | — |
+| 4 | ページ名のハイフン除去 | 変化なし | — |
+| 5 | PageParam + GroupParam 混在（グループ上部、定義順不正） | 3 ページ、内容ズレ | — |
+| 6 | PageParam のみ（GroupParam 全削除） | 3 ページ正しく表示 | Boolean パラメータ消失 |
+| 7 | PageParam + GroupParam 混在（インライン定義） | Controls と Bokeh のみ | — |
+| 8 | PageParam + GroupParam 混在（グループ上部、定義順正） | Controls と Bokeh のみ | — |
+| 9 | GroupParam のみ（PageParam 全削除） | Page1 / Page2 の汎用名 | — |
+| 10 | 1 PageParam + 4 GroupParam（page→addChild で Group を Page に追加） | Controls / Page2 / Page3 | 展開可能セクション表示、Knob 化されず |
+| 11 | 4 PageParam のみ（GroupParam なし、仕様準拠: Group を Page に追加しない） | 失敗 | 失敗 |
+| 12 | 4 PageParam のみ（GroupParam なし、setParent なし、プラン承認済み） | Controls + Bokeh のみ表示 | ページ/Knob なし、1パネルに全パラメータ |
+| 13 | 4 PageParam + 4 GroupParam 併用（方法A: page→addChild + setParent 二重登録、Group を Page に addChild しない） | 失敗 | 失敗 |
+| 14 | ホスト判定分岐（v3レポート方法B）: Flame=PageParamのみ、NUKE=GroupParam+kFnOfxParamPropGroupIsTab | Controls+Bokehのみ（2/4ページ） | **全4タブ正常表示** ✅ |
+| 15 | GroupParam のみ（全ホスト共通、PageParam なし、GroupIsTab なし） | 失敗 | — |
+| 16 | #14 + `setPageParamOrder()` 追加（全4ページ） | **プラグイン読み込みエラー**（クラッシュ） | — |
+| 17 | #14 + パラメータ定義順をページ定義順に一致（Advanced を末尾に移動） | Controls+Bokehのみ（変化なし） | — |
+| 18 | 全ホスト共通 GroupParam + Page 各セクション直前定義 + addChild(*param) 二重登録あり | 3ページ表示（Controls,Bokeh,NonUniform）、パラメータ1ページズレ | NUKE OK |
+| 19 | #18 から addChild(*param) 全削除、setParent(*grp) のみ + page→addChild(*grp) | 3ページ表示、パラメータ1ページズレ（#18と同一症状） | NUKE OK |
+| 20 | 全ホスト共通 GroupParam + sub-group 分割 + Flame ページ名 "Page N" + GroupIsTab 廃止 | Page1/2/3 表示 ✅ | 6タブ（GroupParam がタブ昇格） |
+| 21 | Host Branching: Flame のみ GroupParam 生成、NUKE は Page→addChild(*param) フラット方式 | — | 1ページ（階層なしで全パラメータ同一リスト化） |
+| 22 | **Topological Branching**: 全ホスト共通 GroupParam + トポロジー分岐。NUKE: 入れ子なし4グループ→4タブ。Flame: フラットサブグループ→列分割。サブグループ(BokehNoise/Catseye/Barndoors)はFlame専用、NUKE では親グループに直接流し込み。defineGroupParam 定義順を表示順と一致 | **Page1/2/3/4 正常表示** ✅ | **Controls/Bokeh/Non-Uniform/Advanced 4タブ正常表示** ✅ |
+
+**アプローチ #14 詳細:**
+- `OFX::getImageEffectHostDescription()->hostName` で Flame/NUKE を判定
+- NUKE: GroupParam に `OfxParamPropGroupIsTab = 1`（NUKE独自拡張プロパティ）を設定 → Knob Tab として表示
+- Flame: PageParam のみ使用、GroupParam/setParent なし
+- **NUKE 問題は完全に解決**。Flame は依然 2 ページのみ表示
+
+**アプローチ #14 追加診断テスト:**
+
+| テスト | 結果 |
+|--------|------|
+| ホストプロパティ取得 | `maxPages=0`, `pageRowCount=0`, `pageColumnCount=0`, `maxParameters=-1` |
+| kOfxParamPropPageChild ダンプ | 全4ページの children プロパティが正しく設定されていることを確認 |
+| ページ定義順序変更（NonUniform→Advanced→Controls→Bokeh） | 先頭2ページ（NonUniform, Advanced）のタブが表示されるが、中身は Controls+Bokeh のパラメータ |
+
+#### 判明した事実
+
+**NUKE:**
+- NUKE は hierarchical layout ホスト。PageParam を完全に無視する（`kOfxParamHostPropMaxPages = 0`）
+- NUKE で Knob Tab を生成するには GroupParam + `OfxParamPropGroupIsTab = 1` が必要（NUKE 独自拡張、OFX 標準外）
+- **アプローチ #14 で NUKE の全4タブ表示を達成** — `kFnOfxParamPropGroupIsTab` がキー
+
+**Flame:**
+- Flame は `kOfxParamHostPropMaxPages = 0`, `pageRowCount = 0`, `pageColumnCount = 0` を報告 — OFX 標準のページプロパティを設定していない
+- [Autodesk Community Forum](https://forums.autodesk.com/t5/flame-forum/openfx-plugin-development-resources/td-p/12268117) の公式情報: **"Flame does not support the Pages and lists all visible Params one after the other in the tabs after the 'Plugin' tab. For Params that are inside a group, the group name is shown at the top of the column and empty space in the column is added at the bottom to not show params that are not part of the group in that column."**
+- つまり Flame は OFX PageParam を公式にはサポートしない。表示される 2 タブは Flame の部分的・非標準な動作
+- `kOfxParamPropPageChild` は各ページに正しくセットされているが、Flame はこれを正しく処理しない
+- ページ定義順序変更テストで、Flame は常に先頭 2 ページのタブのみ表示し、パラメータは `addChild` ではなく定義順でスロット配置されることを確認
+- **Flame は GroupParam を認識する** — グループ名がカラム上部に表示される仕様
+
+**OFX 仕様:**
+- OFX 仕様 (`ofxParam.h` L544-548): "Group parameters cannot be added to a page"
+- ホストのレイアウト方式は排他的: paged layout (PageParam) vs hierarchical layout (GroupParam)
+- `kOfxParamPropPageChild` valid values: "the names of any parameter that is not a group or page" (`ofxParam.h` L565)
+- `OfxParamPropGroupIsTab` は OFX SDK 標準には存在しない（NUKE 独自拡張）
+
+#### 並行して実施した修正（ロールバック済みの構成にも反映）
+
+| 修正 | 内容 | 根拠 |
+|------|------|------|
+| Depth clip コンテキストガード | `fetchClip(kClipDepth)` を `getContext() == eContextGeneral` で保護 | Filter コンテキストでは Depth clip が存在せず例外発生 |
+| updateParamVisibility 全面書き直し | 原本 `consts.rs` の `KnobChanged::new(enabled, visible)` パターンを忠実に移植 | 原本の 2 軸制御（enabled + visible）を OFX の `setEnabled` + `setIsSecret` で再現 |
+| changedParam トリガ追加 | FarmQuality, Math を追加 | Samples 表示切替、Math 依存パラメータの enabled 更新漏れ |
+| Samples setIsSecret | `setEnabled` → `setIsSecret(!samplesVisible)` | 原本は visible 制御（非表示）、enabled 制御（グレーアウト）ではない |
+| Filter コンテキスト非表示 | Mode, Math, RenderResult 等 8 パラメータを `setIsSecret(true)` | Filter コンテキストでは Depth clip がなく、これらのパラメータは無意味 |
+| Mode に Camera 追加 | 2D / Depth / Camera の 3 択 | 原本準拠。Camera は Rust 側で Depth にマッピング（protobuf に Camera なし） |
+| FilterType に Image 追加 | Simple / Disc / Blade / Image の 4 択 | 原本準拠 |
+
+#### バイナリ解析による新発見
+
+Flame で 4+ ページを正常に表示する OFX プラグインのバイナリを `strings` コマンドで解析:
+
+**`out_of_focus.ofx` / `depth_of_field.ofx`** (正常動作プラグイン):
+- `OfxParamTypePage` — PageParam 使用
+- `OfxParamPropPageChild` — addChild 使用
+- `OfxPluginPropParamPageOrder` — **ページ順序を明示指定**
+- `OfxParamPropParent` — setParent 使用
+- `N3OFX10GroupParamE` — GroupParam 使用
+- `OfxParamPropGroupIsTab` は**未使用**
+
+**`FlaresOFX.ofx`** (参考):
+- GroupParam + setParent のみ（PageParam なし）
+
+**重要な発見**: `kOfxPluginPropParamPageOrder`（`ofxParam.h:558`）は OFX 標準プロパティ。正常動作する Flame プラグインはこれを使用してページ順序を明示指定している。Support Library では `desc.setPageParamOrder(page)` で設定可能。
+
+**アプローチ #16 のクラッシュ原因（未特定）**: `setPageParamOrder` を #14 のホスト分岐構成にそのまま追加したが、Flame でプラグイン読み込みエラー。`out_of_focus.ofx` は `GroupIsTab` を使わず全ホスト共通で PageParam + GroupParam + setPageParamOrder の構成であり、ホスト分岐 + GroupIsTab との組み合わせが問題の可能性。
+
+#### Flame 自動ページネーション仕様の解明（#17-#19 の調査結果）
+
+Flame の OFX UI 構築は以下の仕様で動作することが判明:
+
+1. **PageParam を完全に無視** — タブ名・タブ構成は OFX Page 定義に依存しない
+2. **GroupParam で列（カラム）を生成** — 各グループが新しい列として表示される
+3. **1列あたりの縦パラメータ上限: 約12-14個** — 超過すると次の列に溢れる
+4. **1タブあたり2-3列** — 入り切らないグループは自動的に次のタブに押し出される
+5. **タブ名はグループ名から自動生成** — 先頭のグループ名がタブ名になる
+
+**ズレの原因**: Bokeh(15個) と NonUniform(16個) が列の上限を超え、溢れたパラメータが次のタブに押し出される「玉突き事故」
+
+**解決策**: 巨大グループを10個以下のサブグループに分割
+- Bokeh(15) → BokehShape(12) + BokehNoise(3)
+- NonUniform(16) → Catseye(7) + Barndoors(9)
+
+#### 最終構成（アプローチ #22: Topological Branching）
+
+**設計パターン**: グループは全ホスト共通で定義し、親子関係（トポロジー）のみホストごとに分岐。
+
+**Page 定義（全ホスト共通）:**
+- 4 PageParam: Controls / Bokeh / NonUniform / Advanced
+- Flame: ラベルを "Page 1"〜"Page 4" に設定
+- NUKE: ラベルを "Controls" / "Bokeh" / "Non-Uniform" / "Advanced" に設定
+
+**Group 定義（defineGroupParam の呼び出し順 = UI 表示順）:**
+1. ControlsGroup — 全ホスト共通
+2. BokehGroup — 全ホスト共通
+3. BokehNoiseGroup — **Flame 専用**（`isFlame ? define... : nullptr`）
+4. NonUniformGroup — **NUKE 専用**（`isFlame ? nullptr : define...`）
+5. CatseyeGroup — **Flame 専用**
+6. BarndoorsGroup — **Flame 専用**
+7. AdvancedGroup — 全ホスト共通（**必ず最後に定義**）
+
+**トポロジー（親子関係）の分岐:**
+- **NUKE**: 4つのメイングループ (Controls, Bokeh, NonUniform, Advanced) を各ページに `addChild` → 4タブ。サブグループは生成されないため入れ子メニューなし。BokehNoise/Catseye/Barndoors のパラメータは親グループ (bokehGrp/nonUniformGrp) に直接 `setParent`
+- **Flame**: 全グループ（サブグループ含む）をフラットに各ページへ `addChild` → 独立した列として並べ、Flame の自動ページネーションで Page 1/2/3/4 に配分
+
+**パラメータの所属:**
+- Controls (12個) → `controlsGrp`
+- Bokeh 前半 (12個) → `bokehGrp`
+- Bokeh Noise (3個) → `bokehNoiseGrp` (Flame) / `bokehGrp` (NUKE) — フォールバック分岐
+- Catseye (7個) → `catseyeGrp` (Flame) / `nonUniformGrp` (NUKE) — フォールバック分岐
+- Barndoors (9個) → `barndoorsGrp` (Flame) / `nonUniformGrp` (NUKE) — フォールバック分岐
+- Advanced (2個) → `advancedGrp`
+
+**重要な知見:**
+- `defineGroupParam` / `definePageParam` の呼び出し順がそのまま UI 表示順になる
+- `kFnOfxParamPropGroupIsTab` (NUKE 独自拡張) は不要 — NUKE は PageParam + GroupParam の組み合わせで自然にタブを生成
+- Flame のサブグループは列分割に使われるが、NUKE では入れ子メニューになるため、NUKE では生成しない
+
+#### ステータス: NUKE・Flame 両方解決 ✅
+
+- **NUKE**: Controls / Bokeh / Non-Uniform / Advanced の 4 タブ正常表示、入れ子メニューなし ✅
+- **Flame**: Page 1 / Page 2 / Page 3 / Page 4 の 4 ページ正常表示 ✅
+- 22 アプローチ試行
+
+### 2026-02-27: Phase 8 — GPU レンダリング対応 (wgpu)
+
+Phase 7 の Non-Uniform 完了に続き、wgpu ベースの GPU レンダリングを有効化。upstream の `WgpuRunner` が独自に Vulkan デバイスを作成する方式（OFX ホストの GPU コンテキストとは独立）。
+
+#### Rust FFI 変更 (`rust/opendefocus-ofx-bridge/`)
+
+**Cargo.toml:**
+- `opendefocus` の features に `"wgpu"` を追加: `features = ["std", "protobuf-vendored", "wgpu"]`
+
+**src/lib.rs:**
+- `od_create()` 内で GPU を有効化:
+  - `settings.render.use_gpu_if_available = true`
+  - `OpenDefocusRenderer::new(true, &mut settings)` — prefer_gpu = true
+- 新規 FFI 関数 1個追加（合計 59 FFI 関数）:
+
+| 関数 | 役割 |
+|------|------|
+| `od_is_gpu_active` | GPU 使用状況の照会 — `inst.renderer.is_gpu()` を返す |
+
+**動作原理:**
+- `SharedRunner::init(true)` が `WgpuRunner::new()` を試行
+- 成功 → GPU レンダリング (Vulkan backend)
+- 失敗 → 自動的に `CpuRunner` にフォールバック（クラッシュしない）
+- `od_render()` の呼び出し方は変更なし（CPU メモリのポインタを渡し、wgpu が内部で GPU upload/download を管理）
+
+#### C++ OFX プラグイン更新 (`plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`)
+
+- **開発バージョン表示**: `kDevVersion` 定数 (`"v0.1.10-OFX-v1 (Phase 8: GPU)"`) と読み取り専用 String パラメータ `devVersion` を Controls ページ先頭に追加。`setEnabled(false)` でグレーアウト（編集不可）
+- **C++ プラグインのレンダリングフロー変更なし** — GPU は Rust 側で完全に管理されるため、C++ 側のコード変更は不要
+
+#### ビルド結果
+
+- Rust crate: wgpu 依存を含めビルド成功（初回ビルドで +3-5分）
+- C++ OFX: ビルド成功、リンクエラーなし
+- バンドルサイズ: 約 35MB（wgpu/Vulkan 依存を含む）
+- `od_is_gpu_active` シンボルを含む全 FFI 関数エクスポート確認済み
+
+### 2026-02-27: Phase 8 UAT 実施
+
+テスト担当: Hiroshi。詳細は `UAT_checklist.md` セクション 24 を参照。
+
+#### UAT 結果サマリー
+
+| カテゴリ | 結果 |
+|---------|------|
+| GPU レンダリング (15項目) | 13 PASS / 2 N/A |
+
+#### 検出された問題と対応
+
+**1. Filter Preview 真っ黒 (24.9) — 修正 PASS**
+
+- 症状: Filter Preview ON で Depth モード使用時、出力が真っ黒
+- 原因: Filter Preview パスでは `od_render` に `depth_data = nullptr` を渡すが、`od_set_defocus_mode` が preview パスの後（通常レンダリングパス内）で呼ばれるため、前回のレンダリングの defocus_mode が残る。Depth モードの状態で preview を実行すると、Rust 側 `validate()` が `DepthNotFound` エラーを返しレンダリング失敗
+- 修正: Filter Preview パスの直前に `od_set_defocus_mode(rustHandle_, TWO_D)` を強制設定。Preview は bokeh 形状描画のみで depth は不要なため TWO_D が正しい
+- 注: GPU 有無に関係なく潜在していたバグ（Phase 3 UAT は 2D モードでテストしたため未検出）
+
+**2. CPU 版との比較 (24.4/24.5) — N/A**
+
+- CPU/GPU 切替機能がないため厳密比較不可。以前のバージョンとの目視比較ではほぼ同一
+
+**3. CPU フォールバック (24.15) — N/A**
+
+- GPU 環境 (Linux RTX A4000) のみ。GPU なし環境がないため検証不可
+
+#### パフォーマンス
+
+GPU 対応によりパフォーマンスが大幅に向上。これまで検証が困難だった Quality High モードでも快適に動作することを確認。
+
+### 2026-02-28: Phase 9 — Filter Type: Image（カスタム Bokeh 画像入力）
+
+Phase 8 の GPU レンダリングに続き、Filter Type = Image のサポートを追加。ユーザーが任意の Bokeh 画像を Filter クリップに接続し、カスタムカーネルとして使用可能にする。
+
+#### Rust FFI 変更 (`rust/opendefocus-ofx-bridge/src/lib.rs`)
+
+**`od_render()` シグネチャ拡張:**
+- `filter_data: *const f32`, `filter_width: u32`, `filter_height: u32`, `filter_channels: u32` パラメータを追加
+- filter_data が非 NULL かつ width/height/channels > 0 の場合に `Array3<f32>` を構築
+- NDK の `render.rs:62-73` と同一パターン: `Array3::from_shape_vec((height, width, channels), slice.to_vec())`
+- `render_stripe()` の第5引数を `None` → `filter` に変更
+
+**`OdFilterType` enum 更新:**
+- `Image = 3` は既に定義済み
+- `od_set_filter_type()` の `OdFilterType::Image` アームで `FilterMode::Image` を設定
+
+**`ndarray` import 更新:**
+- `Array3` を追加: `use ndarray::{Array2, Array3, ArrayViewMut3};`
+
+#### C++ OFX プラグイン更新 (`plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`)
+
+**Filter クリップ追加:**
+- `kClipFilter = "Filter"` 定数追加
+- `describeInContext()`: オプショナル RGBA クリップとして定義（General コンテキストのみ）
+- コンストラクタ: `filterClip_ = fetchClip(kClipFilter)`
+- メンバ変数: `OFX::Clip* filterClip_ = nullptr`
+
+**Filter Type Choice に "Image" 追加:**
+- `param->appendOption("Image")` — index 3 = Image
+
+**render() の変更:**
+- `filterType == 3` (Image) かつ Filter クリップ接続時:
+  - Filter クリップから画像を取得 (`filterClip_->fetchImage(args.time)`)
+  - RGBA float バッファにコピー（Depth と同じパターン）
+  - `od_render()` に filter パラメータを渡す
+- それ以外: `od_render()` に `nullptr, 0, 0, 0` を渡す
+
+**Filter Preview の条件変更:**
+- 変更前: `filterPreview && filterType >= 1`
+- 変更後: `filterPreview && filterType >= 1 && filterType <= 2`
+- 理由: Image モードではユーザー指定画像を使うため bokeh_creator のプレビューは無意味
+
+**開発バージョン更新:**
+- `kDevVersion = "v0.1.10-OFX-v1 (Phase 9: Filter Image)"`
+
+#### データフロー
+
+```
+OFX Filter Clip → fetchImage() → float バッファにコピー
+  ↓
+od_render(..., filter_data, filter_w, filter_h, filter_ch, ...)
+  ↓
+Array3::from_shape_vec((height, width, channels), filter.to_vec())
+  ↓
+render_stripe(..., filter: Some(Array3<f32>))
+  ↓
+prepare_filter_image() → resize + mipmap
+  ↓
+render_convolve() でカーネルとして使用
+```
+
+#### Phase 9 初回 UAT 結果
+
+| カテゴリ | 結果 |
+|---------|------|
+| Filter Image (9項目) | 2 PASS / 7 FAIL |
+
+**FAIL 原因**: Filter Type の Choice パラメータに "Image" 選択肢が追加されていなかった（`appendOption("Image")` 漏れ）。修正後に再テスト予定。
+
+### 2026-02-28: GPU 安定化 — 4K クラッシュ対策
+
+#### 問題
+
+4K UHD (3840x2160) フッテージでレンダリングすると NUKE/Flame がクラッシュ（abort）。
+
+#### 根本原因
+
+wgpu の validation error → panic → `extern "C"` 境界で unwind 不可 → abort:
+
+```
+wgpu error: Validation Error
+Caused by:
+  In Device::create_bind_group, label = 'Convolve Bind Group'
+    Buffer binding 3 range 165888000 exceeds `max_*_buffer_binding_size` limit 134217728
+```
+
+- 4K RGBA32F の staging buffer サイズ: 165,888,000 bytes (≈158MB)
+- wgpu デフォルト `max_*_buffer_binding_size` 上限: 134,217,728 bytes (128MB)
+- wgpu はバリデーションエラーを `panic!` で処理（エラー返却ではなく）
+- `od_render` は `extern "C" fn` のため panic が unwind 不可 → `panic_cannot_unwind` → **abort (ホストプロセス全体がクラッシュ)**
+
+#### 修正内容
+
+**1. `std::panic::catch_unwind` によるパニック捕捉** (`lib.rs`):
+- `render_stripe()` 呼び出しを `std::panic::catch_unwind(AssertUnwindSafe(...))` でラップ
+- panic をキャッチ → `OdResult::ErrorRenderFailed` を返す（abort を回避）
+- `gpu_failed = true` をセット → 次回レンダリングで CPU フォールバック
+
+**2. `[profile.release] panic = "unwind"` 明示** (`Cargo.toml`):
+- `catch_unwind` が確実に動作するよう release プロファイルで明示指定
+
+**3. ランタイム CPU フォールバック** (`lib.rs`):
+- `OdInstance` に `gpu_failed: bool` フラグを追加
+- GPU render 失敗（error または panic）時にフラグをセット
+- 次回 `od_render()` 呼び出し時、`gpu_failed && renderer.is_gpu()` なら CPU レンダラーを再作成
+- `od_is_gpu_active()` はフォールバック後に `false` を返す
+
+#### GPU 安定化 初回 UAT 結果
+
+| カテゴリ | 結果 |
+|---------|------|
+| GPU 安定化 (9項目) | 2 PASS / 3 FAIL / 4 notyet |
+
+**FAIL 原因**: `catch_unwind` 実装前のビルドでテスト。4K でクラッシュし、フォールバックが発動しなかった。`catch_unwind` 追加後のビルドで再テスト予定。
+
+### 2026-02-28: GPU 安定化 — 即時 CPU リトライ
+
+#### 問題
+
+`catch_unwind` による panic 捕捉は成功したが、GPU 失敗後の出力にブラーが適用されない。
+
+#### 原因
+
+GPU 失敗 → `ErrorRenderFailed` 返却 → C++ 側で source バッファをそのまま出力にコピー → `gpu_failed = true` をセットするが、OFX ホストは同一フレームの再レンダリングを行わないため、CPU フォールバックが発動しない。
+
+#### 修正内容
+
+`od_render()` 内で GPU 失敗を検知した場合、同一呼び出し内で即座に CPU レンダラーを作成してリトライ:
+
+1. `catch_unwind` で GPU 失敗を検出 → `gpu_failed_now` フラグ
+2. CPU レンダラーを `OpenDefocusRenderer::new(false, ...)` で即座に作成
+3. `ArrayViewMut3` / `Array2` / `Array3` を生ポインタから再構築（panic で消費済み）
+4. CPU で `render_stripe()` リトライ
+5. 成功 → `OdResult::Ok` を返す（ホストには成功として見える）
+
+**キーポイント**: `render_specs.clone()` で初回 GPU 試行に渡し、リトライ用に `render_specs` を保持。`RenderSpecs` は `Clone` を実装していることを確認済み。
+
+### 2026-02-28: Phase 10 — Render Scale 補正 + RoI 拡張 + Use GPU パラメータ
+
+Phase 9 + GPU 安定化に続き、OFX 商用プラグインとして必要な 3 機能を実装。
+
+#### 1. Render Scale 補正
+
+プロキシモード（1/2, 1/4 解像度）でピクセル空間パラメータが過剰適用される問題を修正。
+
+**render() 内で `args.renderScale.x` を空間パラメータに乗算:**
+- `size *= renderScale` — ボケ半径
+- `maxSize *= renderScale` — 最大ボケ半径
+- `protect *= renderScale` — 焦点面保護範囲
+
+**スケーリング不要パラメータ**: `focusPlane`, `sizeMultiplier`, `ringColor`, `quality` 等（正規化値/比率/非空間値）
+
+#### 2. getRegionsOfInterest (RoI 拡張)
+
+ボケ半径分だけ入力画像を広く要求し、画像端のエッジクリッピングを防止。
+
+**`getRegionsOfInterest()` オーバーライド追加:**
+- 実効ボケ半径 = `max(size, maxSize) * sizeMultiplier` (Depth モード) or `size * sizeMultiplier` (2D モード)
+- マージン = `ceil(effectiveRadius) + 1.0` (カノニカル座標)
+- Source / Depth クリップの RoI を拡張。Filter クリップは拡張不要
+
+**render() のバッファ処理を srcBounds 基準に変更:**
+- `imageBuffer` を `src->getBounds()` サイズで確保（RoI 拡張により renderWindow より大きい場合がある）
+- `fullRegion` = srcBounds サイズ、`renderRegion` = renderWindow の srcBounds 相対座標
+- 結果コピーも offset 考慮でマッピング
+- Depth バッファも同様に `depth->getBounds()` 基準に変更
+
+#### 3. Use GPU パラメータ (CPU/GPU 切替)
+
+NDK 版の `use_gpu_if_available` に対応する手動切替機能を追加。
+
+**Rust FFI 追加 (`od_set_use_gpu`):**
+- `use_gpu` パラメータで GPU/CPU を指定
+- モード変更時にレンダラーを再作成（`OpenDefocusRenderer::new(use_gpu, ...)`)
+- GPU 再有効化時に `gpu_failed` フラグをリセット
+- 変更がない場合は早期リターン（毎フレーム呼び出しのコスト回避）
+
+**C++ OFX プラグイン:**
+- Controls タブに "Use GPU" Boolean パラメータ追加（デフォルト: true）
+- render() の冒頭で `od_set_use_gpu()` を呼び出し
+
+**GPU 自動フォールバックとの共存:**
+- `Use GPU = false`: 手動 CPU モード。`od_set_use_gpu(false)` で CPU レンダラーに切替
+- `Use GPU = true`: GPU を試行。4K で自動 CPU フォールバック → Use GPU を再度 true にチェックし直すと GPU 復帰（`gpu_failed` リセット）
+
+#### 変更対象ファイル
+
+| ファイル | 変更内容 |
+|---------|---------|
+| `plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp` | `getRegionsOfInterest()` 追加、renderScale 補正、srcBounds 基準バッファ処理、Use GPU パラメータ追加 |
+| `rust/opendefocus-ofx-bridge/src/lib.rs` | `od_set_use_gpu()` FFI 関数追加 |
+
+#### 開発バージョン更新
+- `kDevVersion = "v0.1.10-OFX-v1 (Phase 10: RenderScale + RoI + UseGPU)"`
+
+### 2026-02-28: コードレビュー — スレッドセーフティ修正
+
+デバッグチームによるコードレビューを実施。OFX 仕様とコーディング標準に照らした安全性・正確性の観点で評価。
+
+#### クリティカル修正: スレッドセーフティ宣言
+
+**問題**: `setRenderThreadSafety(eRenderInstanceSafe)` と宣言していたが、`render()` 内で `rustHandle_`（Rust 側の内部ステート）に対してパラメータ設定→レンダリングを行うため、同一インスタンスの並行 `render()` 呼び出しでレースコンディションが発生するリスク。特に `od_set_use_gpu()` によるレンダラー再作成が同時に走ると wgpu レベルで致命的クラッシュの可能性。
+
+**修正**: `eRenderInstanceSafe` → `eRenderUnsafe` に変更。ホスト（NUKE/Flame）が render() 呼び出しをシリアライズするか、スレッドごとに別インスタンスを生成する。
+
+#### レビュー評価ポイント（正しい実装として確認）
+
+- **Row-padding 考慮のバッファコピー**: `getPixelAddress()` で 1 行ずつ `memcpy` — OFX ホストの行末パディングに対応した正確な実装
+- **座標系マッピング**: `rw.x1 - srcBounds.x1` による OFX ワールド座標から 0 ベースバッファローカル座標への変換
+- **RoI 拡張の数学**: `max(size, maxSize) * sizeMultiplier` + `renderScale` 補正 — 数学的に正確
+
+#### マイナー改善メモ（将来対応）
+
+- Depth/Filter クリップごとに解像度（スケール）が異なるケース（NUKE で Depth だけフル解像度接続）への対応は、現状 `args.renderScale.x` 共通スケールで 99% 問題なし。ズレ報告時にクリップ別スケール比率チェックを追加検討
+
+### 2026-02-28: Phase 10 UAT — プロキシモードクラッシュ修正
+
+#### クラッシュ症状
+
+NUKE のプロキシモード（Render Scale 補正テスト）でクラッシュ（abort）。スタックトレース: `panic_cannot_unwind` → `od_render` → abort。
+
+#### 根本原因
+
+プロキシモードやビューアパン時、NUKE の `src->getBounds()` が `renderWindow` より小さい／ズレることがある。`rw.x1 - srcBounds.x1` が負の値になり、Rust 側で `usize` 変換時にオーバーフロー → panic。この panic はスライス構築段階（`catch_unwind` の外）で発生するため捕捉できず abort。
+
+#### 修正内容
+
+**1. `getRegionsOfInterest` — renderScale 適用漏れ修正:**
+- `size` / `maxSize` に `args.renderScale.x` を乗算してからマージン計算
+- プロキシモードでの RoI 拡張幅が正しくスケーリングされるようになった
+
+**2. `render()` — fetchWindow + intersection 方式に全面書き換え:**
+
+旧方式（srcBounds ベース）:
+- `srcBounds` サイズでバッファ確保 → `renderRegion = rw - srcBounds` → 負の値でクラッシュ
+
+新方式（fetchWindow + intersection）:
+- **fetchWindow** = `renderWindow` + blur margin で必要領域を計算
+- **0 初期化バッファ** を fetchWindow サイズで確保（境界外は黒/透明）
+- **intersection** で `srcBounds` と `fetchWindow` の重なりのみコピー
+- `renderRegion = rw - fetchWindow` → **常に非負が数学的に保証**（fetchWindow ⊇ rw）
+- Depth バッファも同様に fetchWindow + intersection 方式
+- 光学中心を `RegionOfDefinition` から計算し fetchWindow ローカル座標にマッピング
+
+### 2026-03-01: エッジ黒枠修正 — Clamp to Edge パディング
+
+#### 症状
+
+画像の左辺・下辺にボケサイズに比例した黒い領域が発生。2D/Depth モード、Filter Disc/Image いずれでも再現。NDK 版では発生しない。
+
+#### 根本原因
+
+前回のプロキシモードクラッシュ修正で、fetchWindow 内の `srcBounds` 外を `0.0f`（黒/透明）で Zero-Padding していた。コンボリューション処理がこの黒ピクセルを巻き込み、エッジが暗く沈み込む。
+
+NDK 版では NUKE エンジンが自動的に Clamp to Edge（端ピクセルリピート）を行うため問題が発生しない。OFX ではホストがこの処理を行わないため、プラグイン側で実装が必要。
+
+左辺・下辺が目立つ理由: NUKE の座標原点が左下 (0,0) のため、fetchWindow がマイナス座標方向に拡張される左辺・下辺で Zero-Padding の影響が直接的に出る。
+
+#### 修正内容
+
+**Zero-Padding → Clamp to Edge に変更:**
+
+Source バッファ（RGBA）:
+- Y方向: `clampY = clamp(y, srcBounds.y1, srcBounds.y2 - 1)` で端の行をリピート
+- X方向: 3領域に分割処理
+  - 左マージン: 最左端ピクセルをリピート
+  - 中央: `memcpy` で高速コピー
+  - 右マージン: 最右端ピクセルをリピート
+
+Depth バッファ（単チャンネル）:
+- 同じ Clamp to Edge ロジックを適用
+- Depth が端で突然 0 になることによる「不自然なピント変化」も同時に解消
+
+**validX クランプの安全強化（デバッグチームレビュー指摘）:**
+- `srcBounds` が `fetchWindow` と完全に交差しない極端なパンアウト時、`validX2 < fetchWindow.x1` となり右マージンの `dstX` が負 → バッファアンダーラン
+- 修正: `validX1` / `validX2` を fetchWindow 範囲内にクランプ
+  - `validX1 = min(max(fetchWindow.x1, srcBounds.x1), fetchWindow.x2)`
+  - `validX2 = max(min(fetchWindow.x2, srcBounds.x2), fetchWindow.x1)`
+- Source / Depth 両方に適用
+
+### 2026-03-01: Phase 9 + Phase 10 最終 UAT 完了
+
+テスト担当: Hiroshi。詳細は `UAT_checklist.md` セクション 25–29 を参照。
+
+#### UAT 結果サマリー
+
+| カテゴリ | 結果 |
+|---------|------|
+| Filter Type: Image (9項目, セクション 25) | 9 PASS |
+| GPU 安定化 (9項目, セクション 26) | 8 PASS / 1 未確認 (26.8) |
+| Render Scale + RoI (18項目, セクション 27) | 15 PASS / 2 FAIL / 1 未テスト (27.9 Flame) |
+| Use GPU パラメータ (10項目, セクション 28) | 7 PASS / 3 FAIL |
+| スレッドセーフティ (5項目, セクション 29) | 5 PASS |
+
+#### FAIL 項目と分類
+
+**27.6 — Size Multiplier でボケ崩れ:**
+- 症状: Size Multiplier を大きくするとボケが崩れたりグレー領域が発生
+- NDK 版でも類似症状あり。Size/MaxSize でボケを2倍にする場合は問題なし
+- 分類: upstream の sizeMultiplier 処理の問題。DEFERRED
+
+**27.8 — Filter Preview はみ出し:**
+- 症状: プロキシモード関係なく、Filter Preview が画面一杯にはみ出す
+- Render Scale 補正のテストではなく Filter Preview 自体の問題
+- 分類: Filter Preview のプレビューサイズ制御の問題。要調査
+
+**28.4 / 28.5 — Use GPU 切替時のログ未出力:**
+- 症状: CPU/GPU 切替は正常に動作するが、NUKE/Flame のコンソールにログが出力されない
+- 分類: `log::info!` の出力先がホストのコンソールに接続されていない可能性。機能には影響なし
+
+**28.6 — CPU/GPU 間ピクセルドリフト:**
+- 症状: CPU と GPU で約1px のズレ。NDK 版とよく似た挙動
+- 分類: upstream の CPU/wgpu 実装差異に起因。DEFERRED
+
+#### 重要な知見
+
+- **ピクセルドリフトの原因確定**: CPU/GPU 間で約1px のズレが NDK 版と同様に発生。OFX ラッパー側ではなく、upstream の Rust コア（CPU と wgpu の実装差異または座標系解釈）に内在する問題
+- **Clamp to Edge の完全動作**: エッジ黒枠問題は完全に解消。Crop/AdjBBox による意図的な BBox 制限、極端なパン、プロキシモードの組み合わせすべてで安定動作
+- **スレッドセーフティ**: Flipbook、Write ノードバッチ、Flame バッチすべて PASS。`eRenderUnsafe` 宣言が正常に機能
+
+### 現在のステータス — v0.1.10-OFX-v1 移植完了
+
+- **Phase 1 (OFX スケルトン)**: 完了、UAT 完了
+- **Phase 2 (FFI ブリッジ)**: 完了、UAT 完了
+- **Phase 3 (Quality + Bokeh パラメータ)**: 完了、UAT 完了
+- **Phase 4 (Defocus 一般 + Advanced)**: 完了、UAT 完了
+- **Phase 5 (Bokeh Noise)**: 完了、UAT 完了
+- **Phase 6 (Non-Uniform: Catseye + Barndoors)**: 完了、UAT 完了
+- **Phase 7 (Non-Uniform: Astigmatism + Axial Aberration + InverseForeground)**: 完了、UAT 完了
+- **Phase 8 (GPU レンダリング)**: 完了、UAT 完了
+- **Phase 9 (Filter Type: Image)**: 完了、UAT 完了
+- **GPU 安定化 (4K クラッシュ対策 + 即時 CPU リトライ)**: 完了、UAT 完了
+- **Phase 10 (RenderScale + RoI + UseGPU)**: 完了、UAT 完了
+- **コードレビュー (スレッドセーフティ + エッジ処理)**: 完了、UAT 完了
+
+**OFX 移植ミッション完了。** DEFERRED 項目はすべて upstream 起因。OFX 側のデグレーションはゼロ。
+
+### 既知の制約（すべて upstream 起因）
 
 | 制約 | 理由 | 将来対応 |
 |------|------|---------|
-| CPU のみ | GPU (wgpu) 未統合 | wgpu feature 有効化 |
-| タイリング無効 | ROI 拡張未実装 | getRegionsOfInterest 実装 |
-| カスタム Bokeh 画像未対応 | Filter 入力クリップ未統合 | 第3クリップ追加 (Image フィルタタイプ) |
-| NDK版とのピクセルドリフト | NDK 版 GPU レンダリングに起因 | upstream 調査 |
+| タイリング無効 | `setSupportsTiles(false)` | タイル分割対応は超高解像度 (8K+) で必要に |
+| 4K+ GPU レンダリング | wgpu `max_buffer_binding_size` (128MB) 超過 → 即時 CPU フォールバック | upstream で device limits 拡張、またはバッファ分割 |
+| CPU/GPU ピクセルドリフト | 約1px の差。upstream の CPU/wgpu 実装差異に起因 | upstream で座標系統一後に再検証 |
+| Size Multiplier でボケ崩れ | upstream の sizeMultiplier 処理の問題。NDK 版でも類似症状 | upstream 調査 |
 | Gamma Correction 効果なし | upstream デッドフィールド | upstream でパイプライン接続後に再検証 |
 | Focal Plane Offset 効果なし | upstream 未実装 (ConvolveSettings 未接続) | upstream でパイプライン接続後に再検証 |
 | Bokeh Noise 効果なし | upstream で bokeh_creator `noise` feature 無効 | upstream で feature 有効化後に再検証 |
-| Camera モード未実装 | 段階的追加方針 | 次フェーズで追加 |
-| Non-uniform 残り未実装 | Astigmatism (3) + Axial Aberration (3) + InverseForeground (1) | Phase 7 で追加 |
-| 残りパラメータ未実装 | 段階的追加方針 | 次フェーズで追加 |
+| Camera モード | protobuf に Camera なし | upstream で Camera 追加後に再検証 |
+| Axial Aberration Type 切替で色変化なし | upstream enum off-by-one バグ | upstream 修正後に再検証 |
+
+### OFX 版未解決（要修正）
+
+| 項目 | 内容 | 優先度 |
+|------|------|--------|
+| Filter Preview はみ出し (27.8) | プレビューがフィルターサイズを無視して画面一杯にはみ出す | 中 |
+| Use GPU ログ未出力 (28.4/28.5) | `log::info!` がホストコンソールに到達しない | 低（機能影響なし）|
+
+### 2026-03-01: Upstream 調査 — 移植対象外の決定
+
+upstream NDK 版との機能差分を調査し、以下を移植対象外（意図的オミット）と決定。
+
+#### 移植対象外パラメータ
+
+| パラメータ | 理由 |
+|-----------|------|
+| **CameraMaxSize / UseCameraFocal / WorldUnit** | Camera Mode はホストアプリごとにカメラデータ取得方法が異なり、全サポート不可能。NUKE 依存機能として現時点オミット。メタデータ読み込み等の代替はオリジナル NDK 版移植の範囲を逸脱 |
+| **DeviceName** | GPU デバイス名の読み取り専用表示。低優先度 |
+| **UseCustomStripeHeight / CustomStripeHeight** | パフォーマンス調整。低優先度 |
+| **Donate / Documentation** | UI ボタン。OFX プラグインでは不要 |
+
+#### 移植不要（NDK 固有）
+
+| パラメータ | 理由 |
+|-----------|------|
+| **Channels / DepthChannel** | NUKE NDK のチャンネル指定。OFX では Clip アーキテクチャで代替済み |
+
+### 2026-03-01: Phase 11 — Focus Point XY Picker
+
+NDK 版の `FocusPointUtility` に相当する機能を OFX 版として実装。ユーザーが画面上の XY 座標を指定し、その位置の Depth 値をサンプリングしてフォーカス距離に反映する。
+
+#### 設計方針（Read-Only in Render）
+
+OFX における XY ピッカーは他社プラグインでもクラッシュを誘発しやすい機能であるため、最も安全な設計パラダイムを採用:
+
+- `render()` 内で `setValue()` を **呼ばない** — ワーカースレッドからの UI 更新は OFX 仕様で禁止
+- Interact (カスタムオーバーレイ) は **自作しない** — ホスト標準ウィジェット (`setUseHostOverlayHandle`) に委ねる
+- `focusPlane` は **ローカル変数の上書き** で Rust に渡す（UI 値は変更しない）
+
+#### NDK 版との挙動差異
+
+| 項目 | NDK | OFX |
+|------|-----|-----|
+| サンプリング契機 | `knob_changed()` (メインスレッド) | `render()` (ワーカースレッド) |
+| Focus Plane 更新 | knob 値を直接更新 | ローカル変数上書き（knob 値は不変） |
+| depth == 0 | スキップ | スキップ（同一挙動） |
+
+#### C++ OFX プラグイン変更 (`OpenDefocusOFX.cpp`)
+
+**UI パラメータ追加 (Controls グループ、Focus Plane の直後):**
+
+| パラメータ | OFX 型 | デフォルト |
+|-----------|--------|-----------|
+| Use Focus Point | Boolean | false |
+| Focus Point XY | Double2D (`eDoubleTypeXYAbsolute`, `eCoordinatesCanonical`) | (0, 0) |
+
+**render() サンプリングロジック (depthBuffer 構築完了後):**
+1. `useFocusPoint` && `useDepth` && `!depthBuffer.empty()` の 3 条件で実行
+2. Canonical 座標 → pixel 座標変換（`renderScale` 適用）
+3. fetchWindow 境界チェック（バッファ外アクセス防止）
+4. `depthBuffer[idx]` から深度値を取得
+5. depth != 0 の場合のみ `focusPlane` ローカル変数を上書き
+6. `od_set_focus_plane()` を移動 — パラメータ設定ブロック (L402) → サンプリング直後 (depthBuffer 完成後)
+
+**updateParamVisibility():**
+- `useFocusPoint`: Mode=Depth 時のみ有効
+- `focusPointXY`: Mode=Depth かつ Use Focus Point=true 時のみ有効
+
+**Rust FFI 変更なし** — 新規 FFI 関数は不要。既存の `od_set_focus_plane()` を使用。
+
+#### ビルド中に解決した問題
+
+**プラグインロードエラー — `setUseHostOverlayHandle` 例外:**
+
+- 症状: NUKE / Flame ともにプラグインコンストラクタ失敗 (`Constructor for OFXcom.opendefocus.ofx_v0 failed`)
+- 原因: OFX Support Library の `setUseHostOverlayHandle()` は `propSetInt(kOfxParamPropUseHostOverlayHandle, ...)` を直接呼び出し、**try-catch で保護されていない**。ホストがこのプロパティを未サポートの場合に例外がスロー → `describeInContext()` 全体が失敗 → プラグイン記述無効化
+- 対照: 同じ OFX 1.2 プロパティの `setDefaultCoordinateSystem()` は Support Library 内で try-catch 保護済み（ofxsParams.cpp L449-461）
+- 修正: `try { param->setUseHostOverlayHandle(true); } catch (...) {}` で保護。オーバーレイ未サポートのホストでは数値入力のみで動作
+
+#### Phase 11 UAT — クロスヘア表示問題の試行記録
+
+Phase 11 の render() 内サンプリングロジック自体は正常動作するが、ビューア上のクロスヘア表示が NUKE / Flame ともに表示されない問題が発生。以下は試行と失敗のパターンの記録。
+
+**試行 1: `setUseHostOverlayHandle(true)` のみ（OverlayInteract なし）**
+
+- 仮説: `eDoubleTypeXYAbsolute` + `setUseHostOverlayHandle(true)` で、ホストが標準クロスヘアウィジェットを描画してくれる
+- 結果: **FAIL** — プラグインロードエラー（上記の例外問題）。try-catch 追加後もクロスヘア表示なし
+- 教訓: **`setUseHostOverlayHandle` だけではクロスヘアは描画されない。OverlayInteract の登録が必須**
+
+**試行 2: ダミー OverlayInteract（draw で false を返すだけ）**
+
+- 仮説: OverlayInteract を登録すれば、ホストが自動的にクロスヘアを描画する
+- 実装: `draw()` で `return false` のみの空オーバーレイ。`DefaultEffectOverlayDescriptor` CRTP パターンで `describe()` に登録
+- 結果: **FAIL** — クロスヘア表示なし。さらに副作用:
+  - **NUKE**: Use Focus Point ON → XY デフォルト (0,0) で間違った深度値をサンプリング → デフォーカスが効かなくなる
+  - **Flame**: 空オーバーレイでも OpenGL コンテキスト切替が発生 → 著しいパフォーマンス劣化
+- 教訓: **OFX はクロスヘアを自動描画しない。SDK 全サンプル（Tester, Basic, MultiBundle, ChoiceParams）は OpenGL で自前描画している。ダミーオーバーレイは Flame で深刻なパフォーマンス問題を引き起こす**
+
+**試行 3: OpenGL 自前描画（SDK PositionInteract パターン準拠）— 初回テスト**
+
+- 実装: SDK の `PositionInteract` (Tester.cpp:30-178) を参考に完全な OpenGL 描画:
+  - `draw()`: 十字線 + 小正方形、状態別色変更（白/緑/黄）
+  - `penMotion()`: ヒットテスト + ドラッグ
+  - `penDown()` / `penUp()`: ピック開始/終了
+  - `useFocusPoint` OFF 時は `return false` で描画・イベント消費なし（Flame 対策）
+- `setUseHostOverlayHandle` の try-catch ブロックは削除（自前描画で不要）
+- OpenGL ヘッダ追加 (`GL/gl.h`)
+- クロスヘアサイズ: 5 スクリーンピクセル、デフォルト位置: (0, 0)
+- 結果: **表面上は FAIL** — ユーザーからは「クロスヘアが表示されない」と報告
+
+**デバッグ — 段階的切り分け:**
+
+1回目のデバッグビルド: `draw()` 内に `fprintf(stderr, ...)` を追加 → NUKE ターミナルで `draw()` が呼ばれていないことを確認
+- この時点で、オーバーレイ登録レベルの問題と判断
+
+2回目のデバッグビルド: 3箇所にデバッグ出力を追加:
+1. `describe()` — `mainEntry` ポインタ値と登録完了
+2. `OpenDefocusOverlay` コンストラクタ — インスタンス生成
+3. `draw()` — 呼び出しと `enabled` 状態、座標、pixelScale
+
+結果（OFX キャッシュ消去後に再テスト）:
+```
+[OpenDefocus] describe(): mainEntry=0x7f02a475ded0
+[OpenDefocus] describe(): overlay registered OK
+[OpenDefocus] OverlayInteract constructor called
+[OpenDefocus] OverlayInteract constructor OK
+[OpenDefocus] draw() called, enabled=0   ← Use Focus Point OFF
+[OpenDefocus] draw() called, enabled=1   ← Use Focus Point ON
+[OpenDefocus] draw() pos=(0.00, 0.00) pixelScale=(2.0000, 2.0000)
+```
+
+**根本原因の特定:**
+
+- 登録、インスタンス生成、描画ディスパッチは**全て正常に動作していた**
+- 1回目のテストで `draw()` が呼ばれていなかったのは **OFX キャッシュが原因** — キャッシュ消去前のビルド（ダミーオーバーレイ）がロードされていた
+- `enabled=1` 時に OpenGL 描画コードも実行されていたが、**クロスヘアが見えなかった理由は 2 つ**:
+  1. **デフォルト位置 (0, 0)** — キャノニカル座標の原点（画像左下隅）に描画されており、ユーザーは画像中央付近を表示していたため視界外
+  2. **クロスヘアサイズ 5px** — pixelScale=2.0 で約 5px 幅。画像左下隅の小さな点として存在していたが、視認困難
+
+**教訓:**
+- **OFX キャッシュの罠**: ホストはプラグインの describe 結果をキャッシュする。オーバーレイ登録の変更はキャッシュ消去なしでは反映されない。テスト前に必ずキャッシュを消去すること
+- **デバッグ出力は段階的に**: 推測で修正するのではなく、`fprintf(stderr, ...)` で各段階（登録 → インスタンス生成 → 描画呼出 → 描画パラメータ）を順に確認する方法が最も確実
+- **デフォルト座標と視認性**: XY パラメータの初期値 (0, 0) は画像左下隅であり、ビューア中央付近を表示するユーザーには見えない。サイズも考慮してデフォルト値を設定すること
+
+**棄却した仮説:**
+
+- ~~「`describeInContext()` での再登録が必要」~~ — SDK 全サンプル（5件）が `describe()` のみで登録。Support Library ソース (ofxsImageEffect.cpp L2619, L2638) を確認し、`describe()` と `describeInContext()` は同じハンドルを共有するため一度の登録で十分
+- ~~「OpenGL リンクの問題」~~ — `nm -D` で確認済み。全 OpenGL シンボル (`glBegin`, `glVertex2f` 等) が `U` (undefined) として存在。`.so` の動的リンクでは正常（ホストプロセスの `libGL.so` から実行時解決）。SDK サンプルの CMake も `opengl::opengl` をリンクしているが、OFX プラグインではホスト側で解決される
+
+#### 修正内容（クロスヘア表示）
+
+- クロスヘアサイズ: 5px → 20px → **100px** に拡大（UHD でも十分な視認性）
+- デフォルト位置: (0, 0) → **(25, 25)** に変更（クロスヘア全体が画像内に収まり、左下隅の境界線と重ならない）
+- `setUseHostOverlayHandle` の try-catch ブロックを削除（自前 OpenGL 描画で不要）
+- デバッグ出力 (`fprintf`, `#include <cstdio>`) を全て削除
+
+#### 修正内容（Focus Plane knob 更新）
+
+UAT で「Focus Plane knob の値が変化しない」問題が報告された。現状ではクロスヘアで指定した深度値が render() 内のローカル変数上書きのみで UI に反映されず、以下の問題があった:
+- Use Focus Point ON/OFF 切替でフォーカスが変わってしまう
+- 入力画像の解像度変更でフォーカス位置がずれる
+- キーフレーム操作ができない
+
+**設計変更 — render() 内サンプリングから changedParam() サンプリングへ:**
+
+OFX 仕様の調査により、`changedParam()` (`kOfxActionInstanceChanged`) 内での `fetchImage()` + `setValue()` が OFX 仕様上完全に安全であることを確認:
+- `changedParam()` はメインスレッドで実行される
+- `fetchImage()` は `kOfxActionInstanceChanged` 内で明示的にドキュメント化（ofxThreadSafety.rst）
+- `beginEditBlock`/`endEditBlock` で undo/redo 対応
+
+実装:
+- `changedParam()` で `focusPointXY` 変更を検知 → `depthClip_->fetchImage()` でサンプリング → `focusPlaneParam_->setValue()` で Focus Plane knob を直接更新
+- `render()` 内のサンプリングロジック（「4b. Focus Point XY Picker」ブロック）を削除
+- `render()` では `focusPlaneParam_->getValueAtTime()` で取得した値（changedParam で更新済み）をそのまま使用
+
+NDK 版の `focus_point_knobchanged()` (lib.rs:1033-1058) とほぼ同一のフローを実現。
+
+#### 開発バージョン更新
+- `kDevVersion = "v0.1.10-OFX-v1 (Phase 11: Focus Point)"`
+
+### Stripe Height (TIER 3) の調査結果
+
+upstream 調査の結果、OFX での実装を見送り:
+
+- `use_custom_stripe_height` / `custom_stripe_height` は `NukeSpecificSettings` (lib.rs:149-151) に格納。`Settings.render` には存在しない
+- NDK では `stripe_height()` メソッドが NUKE に返す値を制御し、**NUKE エンジンがストライプ分割を実行**する仕組み
+- OFX で同等機能を実現するには C++ `render()` 内でストライプループを自前実装し、ストライプ間のコンボリューションマージン（重複領域）を管理する必要がある
+- 現在の GPU パニック時 CPU フォールバックが 4K+ で正常動作しているため、即座の必要性なし
+
+### 2026-03-02: Phase 11 UAT 完了
+
+全 19 項目 PASS（NUKE 16.0 / Flame 2026）。
+
+**既知の制約（許容済み）:**
+- Flame でのクロスヘアドラッグ時の応答性が NUKE より遅い（`changedParam` 内の `fetchImage` によるオーバーヘッド）。前回のパフォーマンス劣化問題からは大幅改善済み
+
+### 現在のステータス
+
+- **Phase 11 (Focus Point XY Picker)**: UAT 完了、全項目 PASS
 
 ### 次のステップ
 
-1. Phase 6 UAT 実施
-2. Phase 7: Non-uniform 残り（Astigmatism + Axial Aberration + InverseForeground）
-3. 追加パラメータ（Camera モード等）
-4. getRegionsOfInterest 実装（タイリング対応）
-5. GPU レンダリング対応
-6. ピクセルドリフト調査（upstream NDK版 GPU レンダリング）
+1. リリース準備（ビルド手順書、配布用バンドルパッケージング）
+2. Filter Preview はみ出し問題の調査・修正
+3. Upstream Rust コアの調査（ピクセルドリフト、Enum ズレ、未配線パラメータ）

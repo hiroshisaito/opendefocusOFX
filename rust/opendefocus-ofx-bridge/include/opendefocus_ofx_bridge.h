@@ -6,23 +6,32 @@
 #include <stddef.h>
 
 /**
- * Result codes returned to C++.
- */
-typedef enum OdResult {
-  OK = 0,
-  ERROR_NULL_POINTER = 1,
-  ERROR_INVALID_HANDLE = 2,
-  ERROR_RENDER_FAILED = 3,
-  ERROR_INIT_FAILED = 4,
-} OdResult;
-
-/**
  * Defocus operating mode.
  */
 typedef enum OdDefocusMode {
   TWO_D = 0,
   DEPTH = 1,
+  CAMERA = 2,
 } OdDefocusMode;
+
+/**
+ * Filter type for bokeh shape.
+ */
+typedef enum OdFilterType {
+  SIMPLE = 0,
+  DISC = 1,
+  BLADE = 2,
+  IMAGE = 3,
+} OdFilterType;
+
+/**
+ * Depth math interpretation mode.
+ */
+typedef enum OdMath {
+  DIRECT = 0,
+  ONE_DIVIDED_BY_Z = 1,
+  REAL = 2,
+} OdMath;
 
 /**
  * Render quality preset.
@@ -35,22 +44,15 @@ typedef enum OdQuality {
 } OdQuality;
 
 /**
- * Filter type for bokeh shape.
+ * Result codes returned to C++.
  */
-typedef enum OdFilterType {
-  SIMPLE = 0,
-  DISC = 1,
-  BLADE = 2,
-} OdFilterType;
-
-/**
- * Depth math interpretation mode.
- */
-typedef enum OdMath {
-  DIRECT = 0,
-  ONE_DIVIDED_BY_Z = 1,
-  REAL = 2,
-} OdMath;
+typedef enum OdResult {
+  OK = 0,
+  ERROR_NULL_POINTER = 1,
+  ERROR_INVALID_HANDLE = 2,
+  ERROR_RENDER_FAILED = 3,
+  ERROR_INIT_FAILED = 4,
+} OdResult;
 
 /**
  * Render result output mode.
@@ -78,6 +80,14 @@ enum OdResult od_create(OdHandle *handle_out);
 enum OdResult od_destroy(OdHandle handle);
 
 /**
+ * Query whether the renderer is using GPU acceleration.
+ *
+ * Returns `true` if GPU is active, `false` if CPU fallback is in use.
+ * Returns `false` if the handle is null.
+ */
+bool od_is_gpu_active(OdHandle handle);
+
+/**
  * Set the defocus size (radius in pixels).
  */
 enum OdResult od_set_size(OdHandle handle, float size);
@@ -101,6 +111,11 @@ enum OdResult od_set_quality(OdHandle handle, enum OdQuality quality);
  * Set the image resolution (must be called before render).
  */
 enum OdResult od_set_resolution(OdHandle handle, uint32_t width, uint32_t height);
+
+/**
+ * Set the render center point (image center, required for non-uniform effects).
+ */
+enum OdResult od_set_center(OdHandle handle, float x, float y);
 
 /**
  * Set the render sample count (used when Quality = Custom).
@@ -317,6 +332,50 @@ enum OdResult od_set_barndoors_left(OdHandle handle, float left);
 enum OdResult od_set_barndoors_right(OdHandle handle, float right);
 
 /**
+ * Set astigmatism enable flag.
+ */
+enum OdResult od_set_astigmatism_enable(OdHandle handle, bool enable);
+
+/**
+ * Set astigmatism amount.
+ */
+enum OdResult od_set_astigmatism_amount(OdHandle handle, float amount);
+
+/**
+ * Set astigmatism gamma.
+ */
+enum OdResult od_set_astigmatism_gamma(OdHandle handle, float gamma);
+
+/**
+ * Set axial aberration enable flag.
+ */
+enum OdResult od_set_axial_aberration_enable(OdHandle handle, bool enable);
+
+/**
+ * Set axial aberration amount.
+ */
+enum OdResult od_set_axial_aberration_amount(OdHandle handle, float amount);
+
+/**
+ * Set axial aberration color type (0=RED_BLUE, 1=BLUE_YELLOW, 2=GREEN_PURPLE).
+ */
+enum OdResult od_set_axial_aberration_type(OdHandle handle, int32_t color_type);
+
+/**
+ * Set the global inverse foreground filter shape flag.
+ */
+enum OdResult od_set_inverse_foreground(OdHandle handle, bool inverse);
+
+/**
+ * Set GPU usage preference and recreate the renderer if the mode changed.
+ *
+ * When `use_gpu` transitions from true to false (or vice versa), the internal
+ * renderer is destroyed and recreated with the new preference.
+ * Also resets `gpu_failed` flag when re-enabling GPU.
+ */
+enum OdResult od_set_use_gpu(OdHandle handle, bool use_gpu);
+
+/**
  * Signal or clear the abort flag for rendering.
  */
 enum OdResult od_set_aborted(OdHandle _handle, bool aborted);
@@ -330,6 +389,9 @@ enum OdResult od_set_aborted(OdHandle _handle, bool aborted);
  *
  * `depth_data` may be NULL if defocus_mode is TwoD.
  *
+ * `filter_data` may be NULL if filter_type is not Image.
+ * When provided, must contain `filter_height * filter_width * filter_channels` floats.
+ *
  * `full_region` and `render_region` are [x1, y1, x2, y2] arrays.
  */
 enum OdResult od_render(OdHandle handle,
@@ -340,6 +402,10 @@ enum OdResult od_render(OdHandle handle,
                         const float *depth_data,
                         uint32_t depth_width,
                         uint32_t depth_height,
+                        const float *filter_data,
+                        uint32_t filter_width,
+                        uint32_t filter_height,
+                        uint32_t filter_channels,
                         const int32_t *full_region,
                         const int32_t *render_region);
 

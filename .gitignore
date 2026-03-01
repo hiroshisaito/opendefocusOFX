@@ -18,6 +18,9 @@ Makefile
 rust/opendefocus-ofx-bridge/target/
 Cargo.lock
 
+# References
+references/
+
 # IDE
 .vscode/
 .idea/

@@ -5,7 +5,7 @@
 
 use std::ffi::c_void;
 
-use ndarray::{Array2, ArrayViewMut3};
+use ndarray::{Array2, Array3, ArrayViewMut3};
 use opendefocus::datamodel::{self, bokeh_creator, circle_of_confusion, render::FilterMode};
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,7 @@ pub enum OdResult {
 pub enum OdDefocusMode {
     TwoD = 0,
     Depth = 1,
+    Camera = 2,
 }
 
 /// Render quality preset.
@@ -47,6 +48,7 @@ pub enum OdFilterType {
     Simple = 0,
     Disc = 1,
     Blade = 2,
+    Image = 3,
 }
 
 /// Depth math interpretation mode.
@@ -72,6 +74,7 @@ struct OdInstance {
     settings: datamodel::Settings,
     renderer: opendefocus::OpenDefocusRenderer,
     runtime: tokio::runtime::Runtime,
+    gpu_failed: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -102,10 +105,10 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
     };
 
     let mut settings = datamodel::Settings::default();
-    settings.render.use_gpu_if_available = false; // CPU-only
+    settings.render.use_gpu_if_available = true; // GPU preferred (Phase 1: wgpu independent device)
 
     let renderer =
-        match runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut settings)) {
+        match runtime.block_on(opendefocus::OpenDefocusRenderer::new(true, &mut settings)) {
             Ok(r) => r,
             Err(e) => {
                 log::error!("Failed to create OpenDefocus renderer: {e}");
@@ -117,6 +120,7 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
         settings,
         renderer,
         runtime,
+        gpu_failed: false,
     });
 
     unsafe {
@@ -136,6 +140,18 @@ pub unsafe extern "C" fn od_destroy(handle: OdHandle) -> OdResult {
         let _ = Box::from_raw(handle as *mut OdInstance);
     }
     OdResult::Ok
+}
+
+/// Query whether the renderer is using GPU acceleration.
+///
+/// Returns `true` if GPU is active, `false` if CPU fallback is in use.
+/// Returns `false` if the handle is null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_is_gpu_active(handle: OdHandle) -> bool {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => inst.renderer.is_gpu() && !inst.gpu_failed,
+        None => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +198,8 @@ pub unsafe extern "C" fn od_set_defocus_mode(handle: OdHandle, mode: OdDefocusMo
             let dm = match mode {
                 OdDefocusMode::TwoD => datamodel::defocus::DefocusMode::Twod,
                 OdDefocusMode::Depth => datamodel::defocus::DefocusMode::Depth,
+                // Camera uses Depth internally; camera-specific data (CameraOp) is not yet available in OFX
+                OdDefocusMode::Camera => datamodel::defocus::DefocusMode::Depth,
             };
             inst.settings.defocus.set_defocus_mode(dm);
             OdResult::Ok
@@ -227,6 +245,22 @@ pub unsafe extern "C" fn od_set_resolution(
     }
 }
 
+/// Set the render center point (image center, required for non-uniform effects).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_center(
+    handle: OdHandle,
+    x: f32,
+    y: f32,
+) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.render.center = datamodel::Vector2 { x, y };
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
 /// Set the render sample count (used when Quality = Custom).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn od_set_samples(handle: OdHandle, samples: i32) -> OdResult {
@@ -259,6 +293,9 @@ pub unsafe extern "C" fn od_set_filter_type(handle: OdHandle, filter_type: OdFil
                 OdFilterType::Blade => {
                     inst.settings.render.filter.set_mode(FilterMode::BokehCreator);
                     inst.settings.bokeh.set_filter_type(bokeh_creator::FilterType::Blade);
+                }
+                OdFilterType::Image => {
+                    inst.settings.render.filter.set_mode(FilterMode::Image);
                 }
             }
             OdResult::Ok
@@ -785,6 +822,171 @@ pub unsafe extern "C" fn od_set_barndoors_right(handle: OdHandle, right: f32) ->
 }
 
 // ---------------------------------------------------------------------------
+// Non-uniform: Astigmatism
+// ---------------------------------------------------------------------------
+
+/// Set astigmatism enable flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_astigmatism_enable(handle: OdHandle, enable: bool) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.astigmatism.enable = enable;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set astigmatism amount.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_astigmatism_amount(handle: OdHandle, amount: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.astigmatism.amount = amount;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set astigmatism gamma.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_astigmatism_gamma(handle: OdHandle, gamma: f32) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.astigmatism.gamma = gamma;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Non-uniform: Axial Aberration
+// ---------------------------------------------------------------------------
+
+/// Set axial aberration enable flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_axial_aberration_enable(
+    handle: OdHandle,
+    enable: bool,
+) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.axial_aberration.enable = enable;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set axial aberration amount.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_axial_aberration_amount(
+    handle: OdHandle,
+    amount: f32,
+) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.axial_aberration.amount = amount;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+/// Set axial aberration color type (0=RED_BLUE, 1=BLUE_YELLOW, 2=GREEN_PURPLE).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_axial_aberration_type(
+    handle: OdHandle,
+    color_type: i32,
+) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings
+                .non_uniform
+                .axial_aberration
+                .set_color_type(
+                    datamodel::non_uniform::AxialAberrationType::try_from(color_type)
+                        .unwrap_or(datamodel::non_uniform::AxialAberrationType::RedBlue),
+                );
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Non-uniform: Inverse Foreground (global)
+// ---------------------------------------------------------------------------
+
+/// Set the global inverse foreground filter shape flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_inverse_foreground(
+    handle: OdHandle,
+    inverse: bool,
+) -> OdResult {
+    match unsafe { get_instance(handle) } {
+        Some(inst) => {
+            inst.settings.non_uniform.inverse_foreground = inverse;
+            OdResult::Ok
+        }
+        None => OdResult::ErrorNullPointer,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GPU control
+// ---------------------------------------------------------------------------
+
+/// Set GPU usage preference and recreate the renderer if the mode changed.
+///
+/// When `use_gpu` transitions from true to false (or vice versa), the internal
+/// renderer is destroyed and recreated with the new preference.
+/// Also resets `gpu_failed` flag when re-enabling GPU.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdResult {
+    let inst = match unsafe { get_instance(handle) } {
+        Some(i) => i,
+        None => return OdResult::ErrorNullPointer,
+    };
+
+    let currently_gpu = inst.renderer.is_gpu() && !inst.gpu_failed;
+    let need_recreate = use_gpu != currently_gpu
+        || (use_gpu && inst.gpu_failed)      // re-enable GPU after previous failure
+        || (!use_gpu && inst.renderer.is_gpu()); // force CPU even if GPU is active
+
+    if !need_recreate {
+        inst.settings.render.use_gpu_if_available = use_gpu;
+        return OdResult::Ok;
+    }
+
+    inst.settings.render.use_gpu_if_available = use_gpu;
+
+    let mut new_settings = inst.settings.clone();
+    match inst.runtime.block_on(
+        opendefocus::OpenDefocusRenderer::new(use_gpu, &mut new_settings),
+    ) {
+        Ok(new_renderer) => {
+            inst.renderer = new_renderer;
+            if use_gpu {
+                inst.gpu_failed = false; // reset failure flag on GPU re-enable
+            }
+            log::info!(
+                "Renderer recreated: {}",
+                if inst.renderer.is_gpu() { "GPU" } else { "CPU" }
+            );
+            OdResult::Ok
+        }
+        Err(e) => {
+            log::error!("Failed to recreate renderer: {e}");
+            // Keep old renderer as fallback
+            OdResult::ErrorRenderFailed
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Abort
 // ---------------------------------------------------------------------------
 
@@ -807,6 +1009,9 @@ pub unsafe extern "C" fn od_set_aborted(_handle: OdHandle, aborted: bool) -> OdR
 ///
 /// `depth_data` may be NULL if defocus_mode is TwoD.
 ///
+/// `filter_data` may be NULL if filter_type is not Image.
+/// When provided, must contain `filter_height * filter_width * filter_channels` floats.
+///
 /// `full_region` and `render_region` are [x1, y1, x2, y2] arrays.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn od_render(
@@ -818,6 +1023,10 @@ pub unsafe extern "C" fn od_render(
     depth_data: *const f32,
     depth_width: u32,
     depth_height: u32,
+    filter_data: *const f32,
+    filter_width: u32,
+    filter_height: u32,
+    filter_channels: u32,
     full_region: *const i32,
     render_region: *const i32,
 ) -> OdResult {
@@ -911,22 +1120,163 @@ pub unsafe extern "C" fn od_render(
         },
     };
 
+    // Build filter Array3 if provided (same pattern as render.rs:62-73)
+    let filter = if !filter_data.is_null() && filter_width > 0 && filter_height > 0 && filter_channels > 0 {
+        let filter_count = (filter_height as usize) * (filter_width as usize) * (filter_channels as usize);
+        let filter_slice = unsafe { std::slice::from_raw_parts(filter_data, filter_count) };
+        match Array3::from_shape_vec(
+            (filter_height as usize, filter_width as usize, filter_channels as usize),
+            filter_slice.to_vec(),
+        ) {
+            Ok(arr) => Some(arr),
+            Err(e) => {
+                log::error!("Failed to create filter array: {e}");
+                return OdResult::ErrorRenderFailed;
+            }
+        }
+    } else {
+        None
+    };
+
     // Clear abort flag
     opendefocus::abort::set_aborted(false);
 
-    // Call render via block_on (same pattern as opendefocus-nuke/src/lib.rs:555-568)
-    let result = inst.runtime.block_on(inst.renderer.render_stripe(
-        render_specs,
-        inst.settings.clone(),
-        image,
-        depth,
-        None, // no custom filter image for now
-    ));
+    // If GPU previously failed, recreate as CPU-only before attempting render
+    if inst.gpu_failed && inst.renderer.is_gpu() {
+        log::info!("GPU previously failed, recreating renderer as CPU-only");
+        let mut cpu_settings = inst.settings.clone();
+        cpu_settings.render.use_gpu_if_available = false;
+        match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
+            Ok(cpu_renderer) => {
+                inst.renderer = cpu_renderer;
+                log::info!("CPU renderer created successfully");
+            }
+            Err(e) => {
+                log::error!("Failed to create CPU fallback renderer: {e}");
+                return OdResult::ErrorRenderFailed;
+            }
+        }
+    }
 
-    match result {
-        Ok(()) => OdResult::Ok,
-        Err(e) => {
+    // Call render via block_on, wrapped in catch_unwind to prevent wgpu panics
+    // from crossing the extern "C" boundary (which would abort the host process).
+    // wgpu panics on validation errors (e.g. buffer exceeding max_*_buffer_binding_size
+    // for 4K+ images) instead of returning errors.
+    let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        inst.runtime.block_on(inst.renderer.render_stripe(
+            render_specs.clone(),
+            inst.settings.clone(),
+            image,
+            depth,
+            filter,
+        ))
+    }));
+
+    // Helper to extract panic message
+    let panic_msg = |info: Box<dyn std::any::Any + Send>| -> String {
+        if let Some(s) = info.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".to_string()
+        }
+    };
+
+    // Check if GPU failed and we should retry with CPU immediately
+    let gpu_failed_now = match &render_result {
+        Ok(Ok(())) => false,
+        Ok(Err(_)) => inst.renderer.is_gpu() && !inst.gpu_failed,
+        Err(_) => inst.renderer.is_gpu() && !inst.gpu_failed,
+    };
+
+    if gpu_failed_now {
+        // Log the GPU failure
+        match render_result {
+            Ok(Err(e)) => log::error!("GPU render failed: {e} — retrying with CPU immediately"),
+            Err(info) => log::error!("GPU render panicked: {} — retrying with CPU immediately", panic_msg(info)),
+            _ => {}
+        }
+        inst.gpu_failed = true;
+
+        // Create CPU renderer
+        let mut cpu_settings = inst.settings.clone();
+        cpu_settings.render.use_gpu_if_available = false;
+        match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
+            Ok(cpu_renderer) => {
+                inst.renderer = cpu_renderer;
+                log::info!("CPU fallback renderer created, retrying render");
+            }
+            Err(e) => {
+                log::error!("Failed to create CPU fallback renderer: {e}");
+                return OdResult::ErrorRenderFailed;
+            }
+        }
+
+        // Rebuild array views from raw pointers (originals were consumed by the failed render)
+        let image_retry = match ArrayViewMut3::from_shape(
+            (image_height as usize, image_width as usize, image_channels as usize),
+            unsafe { std::slice::from_raw_parts_mut(image_data, pixel_count) },
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("Failed to recreate image array for CPU retry: {e}");
+                return OdResult::ErrorRenderFailed;
+            }
+        };
+
+        let depth_retry = if !depth_data.is_null() && depth_width > 0 && depth_height > 0 {
+            let depth_count = (depth_height as usize) * (depth_width as usize);
+            let depth_slice = unsafe { std::slice::from_raw_parts(depth_data, depth_count) };
+            Array2::from_shape_vec(
+                (depth_height as usize, depth_width as usize),
+                depth_slice.to_vec(),
+            ).ok()
+        } else {
+            None
+        };
+
+        let filter_retry = if !filter_data.is_null() && filter_width > 0 && filter_height > 0 && filter_channels > 0 {
+            let filter_count = (filter_height as usize) * (filter_width as usize) * (filter_channels as usize);
+            let filter_slice = unsafe { std::slice::from_raw_parts(filter_data, filter_count) };
+            Array3::from_shape_vec(
+                (filter_height as usize, filter_width as usize, filter_channels as usize),
+                filter_slice.to_vec(),
+            ).ok()
+        } else {
+            None
+        };
+
+        opendefocus::abort::set_aborted(false);
+
+        // CPU retry (no catch_unwind needed — CPU renderer won't panic on buffer limits)
+        match inst.runtime.block_on(inst.renderer.render_stripe(
+            render_specs,
+            inst.settings.clone(),
+            image_retry,
+            depth_retry,
+            filter_retry,
+        )) {
+            Ok(()) => {
+                log::info!("CPU fallback render succeeded");
+                return OdResult::Ok;
+            }
+            Err(e) => {
+                log::error!("CPU fallback render also failed: {e}");
+                return OdResult::ErrorRenderFailed;
+            }
+        }
+    }
+
+    // Normal result handling (no GPU failure, or already on CPU)
+    match render_result {
+        Ok(Ok(())) => OdResult::Ok,
+        Ok(Err(e)) => {
             log::error!("Render failed: {e}");
+            OdResult::ErrorRenderFailed
+        }
+        Err(info) => {
+            log::error!("Render panicked: {}", panic_msg(info));
             OdResult::ErrorRenderFailed
         }
     }
