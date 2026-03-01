@@ -7,18 +7,24 @@ build/
 *.dll
 *.exe
 
-# CMake
+# CMake generated files
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
-*.cmake
+compile_commands.json
+
+# OFX bundle (built binary)
+bundle/
+
+# Plugin build artifacts
+plugin/OpenDefocusOFX/cmake/
 
 # Rust
 rust/opendefocus-ofx-bridge/target/
 Cargo.lock
 
-# References
+# References (local PDFs)
 references/
 
 # IDE
@@ -34,3 +40,6 @@ references/
 # Dependencies
 node_modules/
 .env
+
+# Claude Code
+.claude/

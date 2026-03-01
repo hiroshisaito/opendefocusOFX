@@ -1,0 +1,7 @@
+[submodule "upstream/opendefocus"]
+	path = upstream/opendefocus
+	url = https://codeberg.org/gillesvink/opendefocus.git
+
+[submodule "upstream/openfx"]
+	path = upstream/openfx
+	url = https://github.com/AcademySoftwareFoundation/openfx.git
