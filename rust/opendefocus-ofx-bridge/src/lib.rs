@@ -1013,6 +1013,10 @@ pub unsafe extern "C" fn od_set_aborted(_handle: OdHandle, aborted: bool) -> OdR
 /// When provided, must contain `filter_height * filter_width * filter_channels` floats.
 ///
 /// `full_region` and `render_region` are [x1, y1, x2, y2] arrays.
+///
+/// Internally splits the image into horizontal stripes (NDK parity) to keep
+/// wgpu storage buffers under the 128 MB default limit and improve CPU cache
+/// utilization.  Each stripe is rendered via `render_stripe()` independently.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn od_render(
     handle: OdHandle,
@@ -1041,44 +1045,7 @@ pub unsafe extern "C" fn od_render(
         return OdResult::ErrorNullPointer;
     }
 
-    let pixel_count = (image_height as usize) * (image_width as usize) * (image_channels as usize);
-    let image_slice = unsafe { std::slice::from_raw_parts_mut(image_data, pixel_count) };
-
-    // Wrap in ndarray (same pattern as opendefocus-nuke/src/render.rs:36-43)
-    let image = match ArrayViewMut3::from_shape(
-        (
-            image_height as usize,
-            image_width as usize,
-            image_channels as usize,
-        ),
-        image_slice,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("Failed to create image array view: {e}");
-            return OdResult::ErrorRenderFailed;
-        }
-    };
-
-    // Build depth Array2 if provided (same pattern as render.rs:49-56)
-    let depth = if !depth_data.is_null() && depth_width > 0 && depth_height > 0 {
-        let depth_count = (depth_height as usize) * (depth_width as usize);
-        let depth_slice = unsafe { std::slice::from_raw_parts(depth_data, depth_count) };
-        match Array2::from_shape_vec(
-            (depth_height as usize, depth_width as usize),
-            depth_slice.to_vec(),
-        ) {
-            Ok(arr) => Some(arr),
-            Err(e) => {
-                log::error!("Failed to create depth array: {e}");
-                return OdResult::ErrorRenderFailed;
-            }
-        }
-    } else {
-        None
-    };
-
-    // Build RenderSpecs from region arrays
+    // Build RenderSpecs from region arrays (needed for stripe calculation)
     let fr = if full_region.is_null() {
         [0i32, 0, image_width as i32, image_height as i32]
     } else {
@@ -1105,23 +1072,8 @@ pub unsafe extern "C" fn od_render(
         }
     };
 
-    let render_specs = datamodel::render::RenderSpecs {
-        full_region: datamodel::IVector4 {
-            x: fr[0],
-            y: fr[1],
-            z: fr[2],
-            w: fr[3],
-        },
-        render_region: datamodel::IVector4 {
-            x: rr[0],
-            y: rr[1],
-            z: rr[2],
-            w: rr[3],
-        },
-    };
-
-    // Build filter Array3 if provided (same pattern as render.rs:62-73)
-    let filter = if !filter_data.is_null() && filter_width > 0 && filter_height > 0 && filter_channels > 0 {
+    // Build filter Array3 if provided (shared across all stripes, cloned per stripe)
+    let filter_template = if !filter_data.is_null() && filter_width > 0 && filter_height > 0 && filter_channels > 0 {
         let filter_count = (filter_height as usize) * (filter_width as usize) * (filter_channels as usize);
         let filter_slice = unsafe { std::slice::from_raw_parts(filter_data, filter_count) };
         match Array3::from_shape_vec(
@@ -1158,19 +1110,46 @@ pub unsafe extern "C" fn od_render(
         }
     }
 
-    // Call render via block_on, wrapped in catch_unwind to prevent wgpu panics
-    // from crossing the extern "C" boundary (which would abort the host process).
-    // wgpu panics on validation errors (e.g. buffer exceeding max_*_buffer_binding_size
-    // for 4K+ images) instead of returning errors.
-    let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        inst.runtime.block_on(inst.renderer.render_stripe(
-            render_specs.clone(),
-            inst.settings.clone(),
-            image,
-            depth,
-            filter,
-        ))
-    }));
+    // --- Stripe-based rendering (NDK parity) ---
+    //
+    // Split the image into horizontal stripes to:
+    // 1. Keep wgpu storage buffers under 128 MB (enables UHD+ GPU rendering)
+    // 2. Improve CPU cache utilization (each stripe fits in L3 cache)
+    // 3. Allow abort checks between stripes for responsive cancellation
+    //
+    // Stripe height mirrors NDK stripe_height() (lib.rs:458-473).
+    //
+    // IMPORTANT: In NDK, Nuke provides a fresh source buffer per stripe call.
+    // In OFX, we share a single image_data buffer across all stripes.
+    // After rendering stripe N, its render_region contains rendered (blurred)
+    // pixels. Stripe N+1's padding overlaps with stripe N's render_region,
+    // so it would read already-blurred pixels as source — causing visible seams.
+    //
+    // Fix: Clone the source image before the loop. For each stripe, copy fresh
+    // source data into a temporary buffer, render into it, then copy only the
+    // render_region back to the output image_data.
+
+    let is_gpu = inst.renderer.is_gpu() && !inst.gpu_failed;
+    let stripe_h = get_stripe_height(&inst.settings, is_gpu) as i32;
+    // Add extra padding beyond the convolution radius to prevent edge-clamp
+    // artifacts at stripe boundaries.  The upstream kernel's bilinear sampling
+    // (bilinear_depth_based) accesses base_coords + 1, and skip_overlap
+    // processes one extra row (process_region.y - 1).  Without the extra
+    // margin, the outermost ring samples from render_region pixels would hit
+    // ClampToEdge at the stripe buffer boundary, producing subtly different
+    // results compared to a full-image render — visible as periodic seams.
+    // In the NDK flow, NUKE's host engine provides its own additional margin
+    // beyond the plugin's reported padding; we replicate that here.
+    let padding = inst.settings.defocus.get_padding() as i32 + 4;
+
+    let has_depth = !depth_data.is_null() && depth_width > 0 && depth_height > 0;
+    let img_w = image_width as usize;
+    let img_ch = image_channels as usize;
+    let dep_w = depth_width as usize;
+
+    // Snapshot of the original source image (read-only reference for all stripes)
+    let total_img_pixels = (image_height as usize) * img_w * img_ch;
+    let source_image = unsafe { std::slice::from_raw_parts(image_data, total_img_pixels) }.to_vec();
 
     // Helper to extract panic message
     let panic_msg = |info: Box<dyn std::any::Any + Send>| -> String {
@@ -1183,101 +1162,216 @@ pub unsafe extern "C" fn od_render(
         }
     };
 
-    // Check if GPU failed and we should retry with CPU immediately
-    let gpu_failed_now = match &render_result {
-        Ok(Ok(())) => false,
-        Ok(Err(_)) => inst.renderer.is_gpu() && !inst.gpu_failed,
-        Err(_) => inst.renderer.is_gpu() && !inst.gpu_failed,
-    };
+    let mut is_first_gpu_stripe = is_gpu;
+    let mut y_out = rr[1]; // render_region.y
 
-    if gpu_failed_now {
-        // Log the GPU failure
-        match render_result {
-            Ok(Err(e)) => log::error!("GPU render failed: {e} — retrying with CPU immediately"),
-            Err(info) => log::error!("GPU render panicked: {} — retrying with CPU immediately", panic_msg(info)),
-            _ => {}
-        }
-        inst.gpu_failed = true;
-
-        // Create CPU renderer
-        let mut cpu_settings = inst.settings.clone();
-        cpu_settings.render.use_gpu_if_available = false;
-        match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
-            Ok(cpu_renderer) => {
-                inst.renderer = cpu_renderer;
-                log::info!("CPU fallback renderer created, retrying render");
-            }
-            Err(e) => {
-                log::error!("Failed to create CPU fallback renderer: {e}");
-                return OdResult::ErrorRenderFailed;
-            }
+    while y_out < rr[3] {
+        // Abort check between stripes
+        if opendefocus::abort::get_aborted() {
+            return OdResult::Ok;
         }
 
-        // Rebuild array views from raw pointers (originals were consumed by the failed render)
-        let image_retry = match ArrayViewMut3::from_shape(
-            (image_height as usize, image_width as usize, image_channels as usize),
-            unsafe { std::slice::from_raw_parts_mut(image_data, pixel_count) },
+        let y_out_end = (y_out + stripe_h).min(rr[3]);
+
+        // Input range = output range + padding (clamped to buffer bounds)
+        let y_in = (y_out - padding).max(fr[1]);
+        let y_in_end = (y_out_end + padding).min(fr[3]);
+        let stripe_h_in = (y_in_end - y_in) as usize;
+
+        // Build a temporary mutable buffer from the original source data.
+        // This ensures each stripe always sees un-rendered source pixels,
+        // even in padding areas that overlap with previously rendered stripes.
+        let img_offset = (y_in as usize) * img_w * img_ch;
+        let img_count = stripe_h_in * img_w * img_ch;
+        let mut stripe_buf = source_image[img_offset..img_offset + img_count].to_vec();
+
+        // Build stripe RenderSpecs with 0-based coordinates (buffer-local).
+        let stripe_specs = datamodel::render::RenderSpecs {
+            full_region: datamodel::IVector4 {
+                x: 0,
+                y: 0,
+                z: (fr[2] - fr[0]),
+                w: stripe_h_in as i32,
+            },
+            render_region: datamodel::IVector4 {
+                x: -2,
+                y: -2,
+                z: (fr[2] - fr[0]) + 2,
+                w: stripe_h_in as i32 + 2,
+            },
+        };
+
+        let stripe_image = match ArrayViewMut3::from_shape(
+            (stripe_h_in, img_w, img_ch),
+            &mut stripe_buf,
         ) {
             Ok(v) => v,
             Err(e) => {
-                log::error!("Failed to recreate image array for CPU retry: {e}");
+                log::error!("Failed to create stripe image view (y={}): {e}", y_out);
                 return OdResult::ErrorRenderFailed;
             }
         };
 
-        let depth_retry = if !depth_data.is_null() && depth_width > 0 && depth_height > 0 {
-            let depth_count = (depth_height as usize) * (depth_width as usize);
-            let depth_slice = unsafe { std::slice::from_raw_parts(depth_data, depth_count) };
-            Array2::from_shape_vec(
-                (depth_height as usize, depth_width as usize),
-                depth_slice.to_vec(),
-            ).ok()
-        } else {
-            None
-        };
-
-        let filter_retry = if !filter_data.is_null() && filter_width > 0 && filter_height > 0 && filter_channels > 0 {
-            let filter_count = (filter_height as usize) * (filter_width as usize) * (filter_channels as usize);
-            let filter_slice = unsafe { std::slice::from_raw_parts(filter_data, filter_count) };
-            Array3::from_shape_vec(
-                (filter_height as usize, filter_width as usize, filter_channels as usize),
-                filter_slice.to_vec(),
-            ).ok()
-        } else {
-            None
-        };
-
-        opendefocus::abort::set_aborted(false);
-
-        // CPU retry (no catch_unwind needed — CPU renderer won't panic on buffer limits)
-        match inst.runtime.block_on(inst.renderer.render_stripe(
-            render_specs,
-            inst.settings.clone(),
-            image_retry,
-            depth_retry,
-            filter_retry,
-        )) {
-            Ok(()) => {
-                log::info!("CPU fallback render succeeded");
-                return OdResult::Ok;
+        // Build stripe depth Array2 from raw pointer
+        let stripe_depth = if has_depth {
+            let d_offset = (y_in as usize) * dep_w;
+            let d_count = stripe_h_in * dep_w;
+            let d_slice = unsafe { std::slice::from_raw_parts(depth_data.add(d_offset), d_count) };
+            match Array2::from_shape_vec(
+                (stripe_h_in, dep_w),
+                d_slice.to_vec(),
+            ) {
+                Ok(arr) => Some(arr),
+                Err(e) => {
+                    log::error!("Failed to create stripe depth array (y={}): {e}", y_out);
+                    return OdResult::ErrorRenderFailed;
+                }
             }
-            Err(e) => {
-                log::error!("CPU fallback render also failed: {e}");
-                return OdResult::ErrorRenderFailed;
+        } else {
+            None
+        };
+
+        // Helper: copy only the render_region from stripe_buf back to image_data
+        let copy_render_region = |buf: &[f32]| {
+            let y_render_start = (y_out - y_in) as usize;
+            let y_render_end = (y_out_end - y_in) as usize;
+            let render_src_offset = y_render_start * img_w * img_ch;
+            let render_count = (y_render_end - y_render_start) * img_w * img_ch;
+            let out_offset = (y_out as usize) * img_w * img_ch;
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    buf.as_ptr().add(render_src_offset),
+                    image_data.add(out_offset),
+                    render_count,
+                );
+            }
+        };
+
+        // First GPU stripe: wrap in catch_unwind for wgpu panic protection.
+        // If GPU fails, switch to CPU and retry this stripe + all remaining.
+        if is_first_gpu_stripe {
+            is_first_gpu_stripe = false;
+
+            let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                inst.runtime.block_on(inst.renderer.render_stripe(
+                    stripe_specs.clone(),
+                    inst.settings.clone(),
+                    stripe_image,
+                    stripe_depth,
+                    filter_template.clone(),
+                ))
+            }));
+
+            let gpu_failed_now = match &render_result {
+                Ok(Ok(())) => false,
+                Ok(Err(_)) => true,
+                Err(_) => true,
+            };
+
+            if gpu_failed_now {
+                // Log the GPU failure
+                match render_result {
+                    Ok(Err(e)) => log::error!("GPU stripe render failed: {e} — switching to CPU"),
+                    Err(info) => log::error!("GPU stripe render panicked: {} — switching to CPU", panic_msg(info)),
+                    _ => {}
+                }
+                inst.gpu_failed = true;
+
+                // Create CPU renderer
+                let mut cpu_settings = inst.settings.clone();
+                cpu_settings.render.use_gpu_if_available = false;
+                match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
+                    Ok(cpu_renderer) => {
+                        inst.renderer = cpu_renderer;
+                        log::info!("CPU fallback renderer created");
+                    }
+                    Err(e) => {
+                        log::error!("Failed to create CPU fallback renderer: {e}");
+                        return OdResult::ErrorRenderFailed;
+                    }
+                }
+
+                // Retry this stripe with CPU (rebuild from source — originals consumed)
+                let mut retry_buf = source_image[img_offset..img_offset + img_count].to_vec();
+                let retry_image = match ArrayViewMut3::from_shape(
+                    (stripe_h_in, img_w, img_ch),
+                    &mut retry_buf,
+                ) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::error!("Failed to recreate stripe image for CPU retry: {e}");
+                        return OdResult::ErrorRenderFailed;
+                    }
+                };
+
+                let retry_depth = if has_depth {
+                    let d_offset = (y_in as usize) * dep_w;
+                    let d_count = stripe_h_in * dep_w;
+                    let d_slice = unsafe { std::slice::from_raw_parts(depth_data.add(d_offset), d_count) };
+                    Array2::from_shape_vec((stripe_h_in, dep_w), d_slice.to_vec()).ok()
+                } else {
+                    None
+                };
+
+                opendefocus::abort::set_aborted(false);
+
+                match inst.runtime.block_on(inst.renderer.render_stripe(
+                    stripe_specs,
+                    inst.settings.clone(),
+                    retry_image,
+                    retry_depth,
+                    filter_template.clone(),
+                )) {
+                    Ok(()) => {
+                        log::info!("CPU fallback stripe render succeeded");
+                        copy_render_region(&retry_buf);
+                    }
+                    Err(e) => {
+                        log::error!("CPU fallback stripe render also failed: {e}");
+                        return OdResult::ErrorRenderFailed;
+                    }
+                }
+            } else {
+                // GPU success — copy render_region to output
+                copy_render_region(&stripe_buf);
+            }
+        } else {
+            // Subsequent stripes or already on CPU — no catch_unwind needed
+            match inst.runtime.block_on(inst.renderer.render_stripe(
+                stripe_specs,
+                inst.settings.clone(),
+                stripe_image,
+                stripe_depth,
+                filter_template.clone(),
+            )) {
+                Ok(()) => {
+                    copy_render_region(&stripe_buf);
+                }
+                Err(e) => {
+                    log::error!("Stripe render failed (y={}): {e}", y_out);
+                    return OdResult::ErrorRenderFailed;
+                }
             }
         }
+
+        y_out = y_out_end;
     }
 
-    // Normal result handling (no GPU failure, or already on CPU)
-    match render_result {
-        Ok(Ok(())) => OdResult::Ok,
-        Ok(Err(e)) => {
-            log::error!("Render failed: {e}");
-            OdResult::ErrorRenderFailed
-        }
-        Err(info) => {
-            log::error!("Render panicked: {}", panic_msg(info));
-            OdResult::ErrorRenderFailed
-        }
+    OdResult::Ok
+}
+
+/// Determine stripe height based on quality and GPU mode.
+/// Mirrors NDK `stripe_height()` (opendefocus-nuke/src/lib.rs:458-473).
+fn get_stripe_height(settings: &datamodel::Settings, is_gpu: bool) -> u32 {
+    if settings.render.result_mode() == datamodel::render::ResultMode::FocalPlaneSetup {
+        return 32;
+    }
+    if !is_gpu {
+        return 64;
+    }
+    match settings.render.get_quality() {
+        datamodel::render::Quality::Low => 256,
+        datamodel::render::Quality::Medium => 128,
+        _ => 64, // High, Custom
     }
 }

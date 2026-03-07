@@ -27,16 +27,17 @@ endif()
 
 set(RUST_STATICLIB "${RUST_LIB_DIR}/libopendefocus_ofx_bridge.a")
 
-add_custom_command(
-    OUTPUT "${RUST_STATICLIB}"
+# Always run cargo build — cargo itself handles incremental compilation,
+# so this is a no-op when sources haven't changed.  This avoids the problem
+# where CMake's OUTPUT-based dependency tracking doesn't see Rust source
+# changes (the .a already exists) and silently skips recompilation.
+add_custom_target(rust_bridge ALL
     COMMAND ${CMAKE_COMMAND} -E env
         PATH=$ENV{HOME}/.cargo/bin:$ENV{PATH}
         cargo build ${CARGO_BUILD_FLAG}
     WORKING_DIRECTORY "${RUST_BRIDGE_DIR}"
     COMMENT "Building Rust opendefocus-ofx-bridge staticlib"
     VERBATIM)
-
-add_custom_target(rust_bridge DEPENDS "${RUST_STATICLIB}")
 
 # --- OFX Support Library (static) ---
 file(GLOB OFX_SUPPORT_SOURCES "${OFX_SUPPORT_LIBRARY_DIR}/*.cpp")
@@ -75,15 +76,15 @@ target_link_libraries(OpenDefocus PRIVATE
 
 # --- Bundle installation ---
 set(ARCHDIR "Linux-x86-64")
-set(BUNDLE_DIR "${BUNDLE_ROOT}/OpenDefocusOFX.ofx.bundle/Contents/${ARCHDIR}")
+set(BUNDLE_DIR "${BUNDLE_ROOT}/OpenDefocusOFX_stripe.ofx.bundle/Contents/${ARCHDIR}")
 
 add_custom_command(TARGET OpenDefocus POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${BUNDLE_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:OpenDefocus>" "${BUNDLE_DIR}/OpenDefocusOFX.ofx"
-    COMMENT "Copying OpenDefocusOFX.ofx to bundle")
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:OpenDefocus>" "${BUNDLE_DIR}/OpenDefocusOFX_stripe.ofx"
+    COMMENT "Copying OpenDefocusOFX_stripe.ofx to bundle")
 
 # --- System install target ---
 set(SYSTEM_OFX_DIR "/usr/OFX/Plugins")
 install(FILES "$<TARGET_FILE:OpenDefocus>"
-    DESTINATION "${SYSTEM_OFX_DIR}/OpenDefocusOFX.ofx.bundle/Contents/${ARCHDIR}"
-    RENAME "OpenDefocusOFX.ofx")
+    DESTINATION "${SYSTEM_OFX_DIR}/OpenDefocusOFX_stripe.ofx.bundle/Contents/${ARCHDIR}"
+    RENAME "OpenDefocusOFX_stripe.ofx")

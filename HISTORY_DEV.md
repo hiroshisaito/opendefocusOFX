@@ -1312,12 +1312,155 @@ upstream 調査の結果、OFX での実装を見送り:
 **既知の制約（許容済み）:**
 - Flame でのクロスヘアドラッグ時の応答性が NUKE より遅い（`changedParam` 内の `fetchImage` によるオーバーヘッド）。前回のパフォーマンス劣化問題からは大幅改善済み
 
+---
+
+## Performance Optimization（ブランチ: `feature/stripe-rendering`）
+
+### 2026-03-02: パフォーマンス最適化調査
+
+UATフィードバックに基づき、3つのパフォーマンス課題を調査し `OPTIMIZATION_REPORT.md` を作成。
+
+#### 課題一覧
+
+| # | 課題 | 根本原因 | 深刻度 |
+|---|---|---|---|
+| 1 | UHD GPU レンダリング失敗 | wgpu ストレージバッファ上限 128MB 超過（UHD: 158MB） | 高 |
+| 2 | CPU フォールバック時の UHD Quality High 極端な速度低下 | 全フレーム一括処理（ワーキングセット 500MB+） | 高 |
+| 3 | Flame クロスヘアドラッグ応答性 | `fetchImage()` の毎回フル評価オーバーヘッド | 中 |
+
+#### 根本原因分析
+
+OFX ブリッジが画像全体を1バッファとして `render_stripe()` に渡す一方、NDK 版は NUKE のストライプ分割（64–256px）を利用。upstream の `ChunkHandler`（4096×4096 チャンク）は存在するが、チャンクサイズでも 335MB となり GPU バッファ上限を超過する。
+
+#### 対策方針
+
+- **Phase 1**: Rust FFI ブリッジ `od_render()` 内でストライプ分割レンダリングを実装（Issue 1 & 2 同時解決）
+- **Phase 2**: Depth 画像キャッシング（`penDown` 時に `std::vector<float>` にコピー、ドラッグ中はキャッシュから読み取り）
+- **Phase 3（将来）**: スレッドセーフティ分析 → `eRenderInstanceSafe` 化
+
+#### ブランチ運用
+
+- ブランチ `feature/stripe-rendering` を作成、リモートにプッシュ済み
+- main 版と並行ロード・比較のためプラグイン名に `_stripe` postfix を付与:
+  - プラグイン名: `OpenDefocusOFX_stripe`
+  - 識別子: `com.opendefocus.ofx.stripe`
+  - バンドル: `OpenDefocusOFX_stripe.ofx.bundle/`
+- **main マージ時に元の名称に戻す必要あり**
+
+### 2026-03-02: Phase 1 — ストライプベースレンダリング実装
+
+#### 変更ファイル
+
+`rust/opendefocus-ofx-bridge/src/lib.rs` のみ（upstream 変更なし）
+
+#### 実装内容
+
+**`get_stripe_height()` ヘルパー関数追加:**
+
+NDK 版 `stripe_height()` (lib.rs:458-473) と同一ロジック:
+
+| モード | ストライプ高さ |
+|---|---|
+| CPU | 64 px |
+| GPU Low | 256 px |
+| GPU Medium | 128 px |
+| GPU High / Custom | 64 px |
+| FocalPlaneSetup | 32 px |
+
+**`od_render()` のストライプループ化:**
+
+1. ストライプループ前にソース画像全体のコピー (`source_image`) を保持
+2. 各ストライプで `source_image` からフレッシュなバッファ (`stripe_buf`) を構築
+3. ストライプ用 `RenderSpecs` を構築（`full_region.y = y_in` でグローバル座標を保持）
+4. `render_stripe()` 呼び出し後、`stripe_buf` から render_region のみを `image_data` にコピーバック
+5. ストライプ間で `abort` チェック
+6. 最初の GPU ストライプのみ `catch_unwind` でパニック防護、失敗時は CPU にフォールバック
+
+#### 第1回 UAT 結果（ストライプ境界の継ぎ目問題）
+
+全モード・全 Quality で水平方向のストライプ境界に「継ぎ目」が発生。
+
+**根本原因:** 全ストライプが同一の `image_data` バッファを共有していたため、ストライプ N のレンダリング結果（ボケたピクセル）がストライプ N+1 のパディング領域でソースとして読み取られていた。NDK 版では NUKE がストライプごとに新しいバッファ（オリジナルソース）を提供するため、この問題は発生しない。
+
+**修正:** ストライプループ前にソース画像のスナップショット (`source_image`) を保持。各ストライプはこのスナップショットからデータをコピーして独立したバッファで作業し、レンダリング後は render_region のみを出力バッファにコピーバック。これにより NDK 版と同一の動作を実現。
+
+#### 第1回 UAT サマリー
+
+| ステータス | 項目数 | 備考 |
+|---|---|---|
+| PASS | 3 | UHD GPU 成功 (32.3)、UHD CPU 速度改善 (32.4)、極端なボケサイズ (32.15) |
+| FAIL | 12 | ストライプ境界の継ぎ目 (32.1–32.12) → 修正済み、Flame パフォーマンス低下 (32.18) |
+| NOTYET | 2 | プロキシモード (32.13)、マルチフレーム (32.17) |
+| ??? | 1 | abort (32.14) |
+
+#### Flame パフォーマンス低下（32.18）分析
+
+コード差分は `od_render()` 内のストライプ分割のみで、プラグインロード/初期化には変更なし。「読み込み時点から」低下する報告から、**main 版 (`OpenDefocusOFX.ofx`) と stripe 版 (`OpenDefocusOFX_stripe.ofx`) の同時ロードにより、2つの wgpu デバイスが GPU リソースを競合している可能性**が最も高い。stripe 版のみで再テスト予定。
+
+#### GPU フォールバック（32.16）分析
+
+ストライプ分割により各ストライプのバッファが 128MB 以下に収まるため、10K 以上でも GPU レンダリングが成功する（これは想定通りの改善）。12K の "Asked for too-large image input" は NUKE ホスト側のバッファ上限。テスト項目の想定を更新する必要あり。
+
+#### 第2回 UAT 結果
+
+- **Flame パフォーマンス低下 (32.18)**: main 版バンドルを除去し stripe 版のみでテスト → パフォーマンス問題は解消。原因は2つの wgpu デバイスの GPU リソース競合で確定。
+- **ストライプ境界の継ぎ目**: source_image スナップショット修正後も依然として発生。「継ぎ目の最下部のボケが大きくなっている」「等間隔に発生」との報告。
+
+#### 第2回継ぎ目修正: パディング不足の解消
+
+**根本原因分析:**
+
+upstream カーネルの詳細調査により、`get_padding()` が返す値（`ceil(max_size)` = 畳み込み半径ちょうど）では、以下の理由でストライプバッファ境界でのサンプリングに余裕がないことが判明:
+
+1. **`bilinear_depth_based`** が `base_coords + Vec2::ONE`（+1ピクセル）をサンプリング → 畳み込み半径の外側 +1 ピクセルが必要
+2. **`skip_overlap`** が `process_region.y - 1`（1行余分に処理）→ render_region の1行上も処理対象
+3. 上記により、render_region 端のピクセルからの最外周サンプルがストライプバッファ境界の **ClampToEdge** に到達 → フル画像レンダリングとは微妙に異なる畳み込み結果 → 周期的な継ぎ目
+
+NDK 版では NUKE ホストがプラグイン報告のパディングに加えて独自の内部マージンを提供するため、この問題は発生しない。OFX にはそのような機構がない。
+
+**修正:** `lib.rs:1134` でパディング計算を変更:
+```rust
+// Before:
+let padding = inst.settings.defocus.get_padding() as i32;
+// After:
+let padding = inst.settings.defocus.get_padding() as i32 + 4;
+```
++4 の内訳: +1 bilinear 補間、+1 skip_overlap y-1、+2 安全マージン（NUKE ホスト相当）
+
+#### 第3回継ぎ目修正: render_region 拡張
+
+NDK C++ コード (`opendefocus.cpp:177-178`) の精査により、NDK が `render_region = full_region.expand(2)` としてカーネルの `skip_overlap()` にパディング領域含む全ピクセルを処理させていることを発見。OFX ブリッジでは `render_region = 出力領域のみ` としていたため、パディングピクセルが `skip_overlap()` でスキップされていた。
+
+**修正:** `stripe_specs.render_region` を `full_region` より各辺 2px 拡張。
+
+#### 第4回修正: 0起点 full_region
+
+C++ メイン版が `fullRegion = [0, 0, bufWidth, bufHeight]`（0起点）を渡すのに対し、ストライプ版が `full_region.y = y_in`（グローバル座標）を使用していた点に着目。0起点座標 `[0, 0, W, stripe_h_in]` に変更。
+
+#### ビルドシステム問題の発見と修正
+
+第2回〜第4回の修正後の UAT で「継ぎ目が依然として発生」と報告されていたが、**CMake の `add_custom_command` に Rust ソースファイルの `DEPENDS` が未指定**であったため、`make` が Rust コードを再コンパイルしていなかった。全テストは初期実装のバイナリで実行されており、修正は一度も反映されていなかった。
+
+**発見の経緯:** デバッグログ（`/tmp/stripe_debug.log` へのファイル出力）が出力されないことから、ビルド出力のタイムスタンプを確認。`libopendefocus_ofx_bridge.a` とバンドル内の `.ofx` バイナリが全て 3月2日 04:38（初期ビルド時刻）のままであることを確認。
+
+**対処:** ビルド前に静的ライブラリを手動削除して強制再コンパイル:
+```bash
+rm -f rust/opendefocus-ofx-bridge/target/release/libopendefocus_ofx_bridge.a
+make -j$(nproc)
+```
+
+**結果:** 全修正（source_image スナップショット、padding +4、render_region expand(2)、0起点座標）が反映されたバイナリで UAT を実施。**NUKE で継ぎ目が発生しないことを確認**。
+
 ### 現在のステータス
 
-- **Phase 11 (Focus Point XY Picker)**: UAT 完了、全項目 PASS
+- **Phase 11 (Focus Point XY Picker)**: UAT 完了、全項目 PASS（main ブランチ）
+- **Performance Optimization Phase 1**: ストライプベースレンダリング実装完了、NUKE で継ぎ目なしを確認（feature/stripe-rendering ブランチ）。デバッグログの除去と CMake DEPENDS 修正が残作業。
 
 ### 次のステップ
 
-1. リリース準備（ビルド手順書、配布用バンドルパッケージング）
-2. Filter Preview はみ出し問題の調査・修正
-3. Upstream Rust コアの調査（ピクセルドリフト、Enum ズレ、未配線パラメータ）
+1. Phase 1: デバッグログ除去、CMake の DEPENDS 修正（Rust ソース変更時の自動再ビルド）
+2. Phase 1: 全 UAT 項目の再テスト（32.1–32.18）
+3. Phase 2: Depth 画像キャッシングによる Flame ドラッグ応答性改善
+4. リリース準備（ビルド手順書、配布用バンドルパッケージング）
+5. Filter Preview はみ出し問題の調査・修正
+6. Upstream Rust コアの調査（ピクセルドリフト、Enum ズレ、未配線パラメータ）
