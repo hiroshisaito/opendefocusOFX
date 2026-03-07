@@ -1312,12 +1312,155 @@ All 19 items PASS (NUKE 16.0 / Flame 2026).
 **Known Constraints (Accepted):**
 - Crosshair drag responsiveness in Flame is slower than NUKE (overhead from `fetchImage` within `changedParam`). Significantly improved from previous performance degradation issue
 
+---
+
+## Performance Optimization (Branch: `feature/stripe-rendering`)
+
+### 2026-03-02: Performance Optimization Investigation
+
+Based on UAT feedback, investigated three performance issues and created `OPTIMIZATION_REPORT.md`.
+
+#### Issue Summary
+
+| # | Issue | Root Cause | Severity |
+|---|---|---|---|
+| 1 | UHD GPU rendering fails | wgpu storage buffer limit 128MB exceeded (UHD: 158MB) | High |
+| 2 | Extreme slowdown with CPU fallback at UHD Quality High | Single-pass full-frame processing (500MB+ working set) | High |
+| 3 | Flame crosshair drag responsiveness | `fetchImage()` full evaluation overhead on each call | Medium |
+
+#### Root Cause Analysis
+
+The OFX bridge passes the entire image as a single buffer to `render_stripe()`, while the NDK version leverages NUKE's stripe splitting (64–256px). The upstream `ChunkHandler` (4096×4096 chunks) exists but chunk sizes still produce 335MB storage buffers, exceeding the GPU buffer limit.
+
+#### Solution Strategy
+
+- **Phase 1**: Implement stripe-based rendering within Rust FFI bridge `od_render()` (solves Issues 1 & 2 simultaneously)
+- **Phase 2**: Depth image caching (copy to `std::vector<float>` on `penDown`, read from cache during drag)
+- **Phase 3 (Future)**: Thread safety analysis → upgrade to `eRenderInstanceSafe`
+
+#### Branch Operations
+
+- Created branch `feature/stripe-rendering`, pushed to remote
+- Plugin names have `_stripe` postfix for parallel loading and comparison with main:
+  - Plugin name: `OpenDefocusOFX_stripe`
+  - Identifier: `com.opendefocus.ofx.stripe`
+  - Bundle: `OpenDefocusOFX_stripe.ofx.bundle/`
+- **Must revert to original names when merging to main**
+
+### 2026-03-02: Phase 1 — Stripe-Based Rendering Implementation
+
+#### Changed Files
+
+`rust/opendefocus-ofx-bridge/src/lib.rs` only (no upstream changes)
+
+#### Implementation Details
+
+**Added `get_stripe_height()` helper function:**
+
+Same logic as NDK `stripe_height()` (lib.rs:458-473):
+
+| Mode | Stripe Height |
+|---|---|
+| CPU | 64 px |
+| GPU Low | 256 px |
+| GPU Medium | 128 px |
+| GPU High / Custom | 64 px |
+| FocalPlaneSetup | 32 px |
+
+**Converted `od_render()` to stripe loop:**
+
+1. Snapshot entire source image (`source_image`) before stripe loop
+2. For each stripe, build fresh buffer (`stripe_buf`) from `source_image`
+3. Build per-stripe `RenderSpecs` (`full_region.y = y_in` to preserve global coordinates)
+4. After `render_stripe()`, copy only render_region from `stripe_buf` back to `image_data`
+5. Abort check between stripes
+6. First GPU stripe only: `catch_unwind` for panic protection, CPU fallback on failure
+
+#### First UAT Results (Stripe Boundary Seam Issue)
+
+Horizontal stripe boundary "seams" observed across all modes and Quality levels.
+
+**Root cause:** All stripes shared the same `image_data` buffer. After rendering stripe N, its render_region contained rendered (blurred) pixels. Stripe N+1's padding area overlapped with stripe N's render_region, reading already-blurred pixels as source. In NDK, Nuke provides a fresh buffer (original source) for each stripe call, preventing this issue.
+
+**Fix:** Snapshot source image before stripe loop. Each stripe copies fresh data from the snapshot into an independent buffer, renders into it, then copies only the render_region back to the output buffer. This achieves identical behavior to NDK.
+
+#### First UAT Summary
+
+| Status | Count | Notes |
+|---|---|---|
+| PASS | 3 | UHD GPU success (32.3), UHD CPU speed improvement (32.4), extreme bokeh size (32.15) |
+| FAIL | 12 | Stripe boundary seams (32.1–32.12) → fixed, Flame performance degradation (32.18) |
+| NOTYET | 2 | Proxy mode (32.13), multi-frame (32.17) |
+| ??? | 1 | Abort (32.14) |
+
+#### Flame Performance Degradation (32.18) Analysis
+
+Code diff is limited to stripe splitting in `od_render()` only — no changes to plugin load/initialization. Given the report of degradation "from plugin load", the most likely cause is **simultaneous loading of main (`OpenDefocusOFX.ofx`) and stripe (`OpenDefocusOFX_stripe.ofx`) plugins, with two wgpu devices competing for GPU resources**. Retest with stripe version only is planned.
+
+#### GPU Fallback (32.16) Analysis
+
+Stripe splitting keeps each stripe's buffer under 128MB, so GPU rendering succeeds even at 10K+ (this is the intended improvement). The 12K "Asked for too-large image input" error is a NUKE host-side buffer limit. Test item expectations need updating.
+
+#### Second UAT Results
+
+- **Flame performance degradation (32.18)**: Removed main bundle, tested with stripe version only → performance issue resolved. Confirmed cause was two wgpu devices competing for GPU resources.
+- **Stripe boundary seams**: Still present after source_image snapshot fix. Report: "bokeh at the bottom of seams appears larger", "seams occur at equal intervals".
+
+#### Second Seam Fix: Insufficient Padding
+
+**Root Cause Analysis:**
+
+Detailed investigation of upstream kernel revealed that `get_padding()` returns `ceil(max_size)` (exactly the convolution radius), which provides zero margin for boundary sampling due to:
+
+1. **`bilinear_depth_based`** samples at `base_coords + Vec2::ONE` (+1 pixel) → requires +1 pixel beyond convolution radius
+2. **`skip_overlap`** processes `process_region.y - 1` (one extra row) → processes 1 row above render_region
+3. These cause outermost ring samples from render_region edge pixels to hit **ClampToEdge** at stripe buffer boundary → subtly different convolution results vs full-image render → periodic seams
+
+In NDK, Nuke host provides additional internal margin beyond the plugin's reported padding, preventing this issue. OFX has no such mechanism.
+
+**Fix:** Changed padding calculation in `lib.rs:1134`:
+```rust
+// Before:
+let padding = inst.settings.defocus.get_padding() as i32;
+// After:
+let padding = inst.settings.defocus.get_padding() as i32 + 4;
+```
++4 breakdown: +1 bilinear interpolation, +1 skip_overlap y-1, +2 safety margin (Nuke host equivalent)
+
+#### Third Seam Fix: render_region Expansion
+
+Detailed analysis of NDK C++ code (`opendefocus.cpp:177-178`) revealed that NDK sets `render_region = full_region.expand(2)`, causing the kernel's `skip_overlap()` to process ALL buffer pixels including padding. The OFX bridge had set `render_region = output area only`, causing padding pixels to be skipped by `skip_overlap()`.
+
+**Fix:** Expanded `stripe_specs.render_region` by 2px on each side beyond `full_region`.
+
+#### Fourth Fix: Zero-Based full_region
+
+Noted that the C++ main branch passes `fullRegion = [0, 0, bufWidth, bufHeight]` (zero-based), while the stripe version used `full_region.y = y_in` (global coordinates). Changed to zero-based coordinates `[0, 0, W, stripe_h_in]`.
+
+#### Build System Issue Discovery and Resolution
+
+UAT after fixes 2–4 had reported "seams still present", but **the CMake `add_custom_command` lacked `DEPENDS` on Rust source files**, so `make` never recompiled the Rust code. All tests were executed against the initial implementation binary — none of the fixes were ever deployed.
+
+**Discovery:** Debug logging (file output to `/tmp/stripe_debug.log`) produced no output, prompting a timestamp check on build artifacts. Both `libopendefocus_ofx_bridge.a` and the bundled `.ofx` binary had timestamps of March 2 04:38 (initial build time) — unchanged across all subsequent builds.
+
+**Workaround:** Force recompilation by deleting the static library before building:
+```bash
+rm -f rust/opendefocus-ofx-bridge/target/release/libopendefocus_ofx_bridge.a
+make -j$(nproc)
+```
+
+**Result:** UAT with the binary containing all fixes (source_image snapshot, padding +4, render_region expand(2), zero-based coordinates) confirmed **no seams in NUKE**.
+
 ### Current Status
 
-- **Phase 11 (Focus Point XY Picker)**: UAT complete, all items PASS
+- **Phase 11 (Focus Point XY Picker)**: UAT complete, all items PASS (main branch)
+- **Performance Optimization Phase 1**: Stripe-based rendering implementation complete, no seams confirmed in NUKE (feature/stripe-rendering branch). Remaining work: debug log removal and CMake DEPENDS fix.
 
 ### Next Steps
 
-1. Release preparation (build procedure documentation, distribution bundle packaging)
-2. Investigation and fix of Filter Preview overflow issue
-3. Upstream Rust core investigation (pixel drift, enum misalignment, unwired parameters)
+1. Phase 1: Remove debug logging, fix CMake DEPENDS (auto-rebuild on Rust source changes)
+2. Phase 1: Full UAT retest (items 32.1–32.18)
+3. Phase 2: Depth image caching for Flame drag responsiveness improvement
+4. Release preparation (build procedure documentation, distribution bundle packaging)
+5. Investigation and fix of Filter Preview overflow issue
+6. Upstream Rust core investigation (pixel drift, enum misalignment, unwired parameters)

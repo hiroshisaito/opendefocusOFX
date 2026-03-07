@@ -393,6 +393,10 @@ enum OdResult od_set_aborted(OdHandle _handle, bool aborted);
  * When provided, must contain `filter_height * filter_width * filter_channels` floats.
  *
  * `full_region` and `render_region` are [x1, y1, x2, y2] arrays.
+ *
+ * Internally splits the image into horizontal stripes (NDK parity) to keep
+ * wgpu storage buffers under the 128 MB default limit and improve CPU cache
+ * utilization.  Each stripe is rendered via `render_stripe()` independently.
  */
 enum OdResult od_render(OdHandle handle,
                         float *image_data,
