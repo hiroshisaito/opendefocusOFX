@@ -390,8 +390,8 @@
 
 | # | Test Item | Result | Notes |
 |---|-----------|--------|-------|
-| 32.1 | HD (1920×1080) GPU rendering produces equivalent output to existing results | RETEST | A/B comparison with main branch. Retest needed after build system fix. |
-| 32.2 | HD (1920×1080) CPU rendering produces equivalent output to existing results | RETEST | Comparison with Use GPU=false. Retest needed after build system fix. |
+| 32.1 | HD (1920×1080) GPU rendering produces equivalent output to existing results | RETEST | Compare with NDK original, or cross-compare Quality levels (Low/Medium/High) for identical output |
+| 32.2 | HD (1920×1080) CPU rendering produces equivalent output to existing results | RETEST | Use GPU=false. Compare with NDK original, or cross-compare Quality levels |
 | 32.3 | UHD (3840×2160) GPU rendering succeeds | PASS | Previously failed due to wgpu storage buffer limit exceeded. UHD GPU rendering now possible. |
 | 32.4 | UHD (3840×2160) CPU rendering completes at practical speed | PASS | No hang or extreme delay |
 | 32.5 | Quality=Low (stripe 256px) renders correctly | RETEST | No seams at stripe boundaries. Retest needed after build system fix. |
@@ -402,6 +402,7 @@
 | 32.10 | Filter Type=Image: filter applied consistently across stripes | RETEST | Combined with custom Bokeh image input. Retest needed after build system fix. |
 | 32.11 | Catseye Enable=true: continuous stripe boundaries (no seams) | RETEST | Non-uniform bokeh stripe boundary verification. Retest needed after build system fix. |
 | 32.12 | Barndoors Enable=true: continuous stripe boundaries (no seams) | RETEST | Non-uniform bokeh stripe boundary verification. Retest needed after build system fix. |
+| 32.12a | Astigmatism Enable=true: continuous stripe boundaries (no seams) | RETEST | Non-uniform bokeh stripe boundary verification. Retest needed after global coordinate fix. |
 | 32.13 | Proxy mode (1/2, 1/4) renderScale correctly applied | RETEST | Combination with stripe splitting. Retest needed after build system fix. |
 | 32.14 | Abort during rendering responds immediately between stripes | RETEST | Inter-stripe abort check. Retest needed after build system fix. |
 | 32.15 | No crash with extreme bokeh size (Size=500+) with large padding | PASS | Rendering takes time but completes without crash. Padding > stripe height case. |
