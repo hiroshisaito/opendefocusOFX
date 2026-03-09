@@ -1185,19 +1185,22 @@ pub unsafe extern "C" fn od_render(
         let img_count = stripe_h_in * img_w * img_ch;
         let mut stripe_buf = source_image[img_offset..img_offset + img_count].to_vec();
 
-        // Build stripe RenderSpecs with 0-based coordinates (buffer-local).
+        // Build stripe RenderSpecs with global coordinates.
+        // full_region.y must encode the stripe's absolute Y offset so that
+        // get_real_coordinates() returns correct screen-space positions for
+        // position-dependent effects (astigmatism, catseye, barndoors).
         let stripe_specs = datamodel::render::RenderSpecs {
             full_region: datamodel::IVector4 {
-                x: 0,
-                y: 0,
-                z: (fr[2] - fr[0]),
-                w: stripe_h_in as i32,
+                x: fr[0],
+                y: y_in,
+                z: fr[2],
+                w: y_in_end,
             },
             render_region: datamodel::IVector4 {
-                x: -2,
-                y: -2,
-                z: (fr[2] - fr[0]) + 2,
-                w: stripe_h_in as i32 + 2,
+                x: rr[0] - 2,
+                y: y_out - 2,
+                z: rr[2] + 2,
+                w: y_out_end + 2,
             },
         };
 
