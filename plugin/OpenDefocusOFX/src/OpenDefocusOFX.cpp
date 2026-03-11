@@ -726,12 +726,29 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     int margin = static_cast<int>(std::ceil(effectiveRadius) + 1.0);
 
     OfxRectI fetchWindow = rw;
-    fetchWindow.x1 -= margin;
+    // Only expand Y axis — Rust stripe code uses Y margin for stripe padding.
+    // X axis is NOT expanded: wgpu texture ClampToEdge provides equivalent
+    // edge behavior.
     fetchWindow.y1 -= margin;
-    fetchWindow.x2 += margin;
     fetchWindow.y2 += margin;
 
+    // Cap buffer width to prevent the upstream ChunkHandler (limit=4096)
+    // from splitting horizontally.  The ChunkHandler processes chunks
+    // in-place, so chunk N+1 reads chunk N's blurred output in the overlap
+    // zone, causing visible vertical seams at the chunk boundary.
+    // OFX hosts may provide renderWindow with overscan (e.g. -12..4108 for
+    // 4K-DCP), pushing bufWidth past 4096.  Trim the overscan symmetrically;
+    // the ClampToEdge copy loop already handles edge pixels.
     int bufWidth  = fetchWindow.x2 - fetchWindow.x1;
+    if (bufWidth > 4096) {
+        int excess = bufWidth - 4096;
+        int trimLeft = excess / 2;
+        int trimRight = excess - trimLeft;
+        fetchWindow.x1 += trimLeft;
+        fetchWindow.x2 -= trimRight;
+        bufWidth = 4096;
+    }
+
     int bufHeight = fetchWindow.y2 - fetchWindow.y1;
 
     if (bufWidth <= 0 || bufHeight <= 0) return;
@@ -917,17 +934,19 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
                   static_cast<float>(centerWorldX - fetchWindow.x1),
                   static_cast<float>(centerWorldY - fetchWindow.y1));
 
-    // renderRegion is always non-negative (rw is inside fetchWindow by construction)
+    // renderRegion in buffer-local coordinates, clamped to buffer bounds.
+    // fetchWindow X may have been trimmed to cap bufWidth ≤ 4096, so rw
+    // can extend beyond fetchWindow — clamp to [0, bufWidth/bufHeight].
     int32_t fullRegion[4] = {
         0, 0,
         static_cast<int32_t>(bufWidth),
         static_cast<int32_t>(bufHeight)
     };
     int32_t renderRegion[4] = {
-        static_cast<int32_t>(rw.x1 - fetchWindow.x1),
-        static_cast<int32_t>(rw.y1 - fetchWindow.y1),
-        static_cast<int32_t>(rw.x2 - fetchWindow.x1),
-        static_cast<int32_t>(rw.y2 - fetchWindow.y1)
+        static_cast<int32_t>(std::max(0, rw.x1 - fetchWindow.x1)),
+        static_cast<int32_t>(std::max(0, rw.y1 - fetchWindow.y1)),
+        static_cast<int32_t>(std::min(bufWidth,  rw.x2 - fetchWindow.x1)),
+        static_cast<int32_t>(std::min(bufHeight, rw.y2 - fetchWindow.y1))
     };
 
     od_set_aborted(rustHandle_, false);
@@ -948,15 +967,46 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
         fullRegion,
         renderRegion);
 
-    // Copy result to OFX output (fetchWindow-local → world coords)
+    // Copy result to OFX output (fetchWindow-local → world coords).
+    // fetchWindow X may have been trimmed to cap bufWidth, so rw can extend
+    // beyond fetchWindow.  Copy the intersection; replicate edge pixels for
+    // the overscan zones that fall outside the rendered buffer.
+    int copyX1 = std::max(rw.x1, fetchWindow.x1);
+    int copyX2 = std::min(rw.x2, fetchWindow.x2);
+    int copyWidth = std::max(0, copyX2 - copyX1);
+
     for (int y = rw.y1; y < rw.y2; ++y) {
-        float* dstRow = static_cast<float*>(dst->getPixelAddress(rw.x1, y));
         int bufY = y - fetchWindow.y1;
-        int bufX = rw.x1 - fetchWindow.x1;
-        const float* bufRow = imageBuffer.data()
-            + (static_cast<size_t>(bufY) * bufWidth + bufX) * 4;
-        if (dstRow) {
-            std::memcpy(dstRow, bufRow, width * 4 * sizeof(float));
+
+        // Centre: memcpy rendered data
+        if (copyWidth > 0) {
+            float* dstRow = static_cast<float*>(dst->getPixelAddress(copyX1, y));
+            int bufX = copyX1 - fetchWindow.x1;
+            const float* bufRow = imageBuffer.data()
+                + (static_cast<size_t>(bufY) * bufWidth + bufX) * 4;
+            if (dstRow) {
+                std::memcpy(dstRow, bufRow, copyWidth * 4 * sizeof(float));
+            }
+        }
+
+        // Left overscan: replicate leftmost buffer pixel
+        if (rw.x1 < copyX1) {
+            const float* edgePx = imageBuffer.data()
+                + static_cast<size_t>(bufY) * bufWidth * 4;
+            for (int x = rw.x1; x < copyX1; ++x) {
+                float* px = static_cast<float*>(dst->getPixelAddress(x, y));
+                if (px) std::memcpy(px, edgePx, 4 * sizeof(float));
+            }
+        }
+
+        // Right overscan: replicate rightmost buffer pixel
+        if (copyX2 < rw.x2) {
+            const float* edgePx = imageBuffer.data()
+                + (static_cast<size_t>(bufY) * bufWidth + bufWidth - 1) * 4;
+            for (int x = copyX2; x < rw.x2; ++x) {
+                float* px = static_cast<float*>(dst->getPixelAddress(x, y));
+                if (px) std::memcpy(px, edgePx, 4 * sizeof(float));
+            }
         }
     }
 
