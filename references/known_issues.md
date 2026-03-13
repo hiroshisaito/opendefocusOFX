@@ -30,6 +30,8 @@
 | 15 | UHD CPU 極端な低速 | Architecture | FIXED | stripe rendering で解決 |
 | 16 | Flame crosshair ドラッグ応答性 | Architecture | IDENTIFIED | OFX API 制約 |
 | 17 | レンダー中 abort 未実装 | Architecture | IDENTIFIED | OFX abort() 未呼び出し |
+| 18 | Catseye Enable=off でも Barndoor 時に適用 | Upstream | DEFERRED | calculate_catseye() の enable チェック欠落 |
+| 19 | Axial Aberration enable フラグ誤参照 | Upstream | DEFERRED | BARNDOORS_ENABLED をチェック（コピペミス） |
 
 ---
 
@@ -77,6 +79,20 @@
 - Size Multiplier を大きな値にするとボケが崩壊またはグレー領域が出現
 - Size/MaxSize パラメータ経由で同等のボケサイズにした場合は正常
 - NDK 版でも類似症状
+
+### 18. Catseye Enable=off でも Barndoor Enable 時に Catseye 効果が適用される
+
+- **原因**: `opendefocus-kernel/src/stages/non_uniform.rs` の `get_non_uniform()` で `calculate_catseye()` が無条件に呼ばれている
+- Barndoors と Astigmatism は `if_else!` マクロで `NonUniformFlags` の enable フラグをチェックしているが、Catseye だけチェックが欠落
+- Barndoor Enable=on → non-uniform レンダリングパス実行 → Catseye が無条件に適用
+- **影響**: Catseye Enable=off でも Catseye パラメータ値に応じたボケ変形が発生
+- **修正箇所**: `non_uniform.rs` L65-70 に `NonUniformFlags::CATSEYE_ENABLED` チェックの追加が必要
+
+### 19. Axial Aberration の enable フラグが誤ったビットフラグを参照
+
+- **原因**: `opendefocus-shared/src/internal_settings.rs` の `get_axial_aberration_settings()` が `BARNDOORS_ENABLED` をチェックしている（コピペミス）
+- 本来は Axial Aberration 用のフラグを参照すべき
+- **影響**: Barndoor Enable に連動して Axial Aberration が有効化される可能性
 
 ---
 

@@ -1586,5 +1586,5 @@ Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
 1. Open test release: v0.1.10-OFX-v1
 2. Phase 2: Abort callback implementation (Known Issue #17)
 3. Investigation and fix of Filter Preview overflow issue (27.8)
-4. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise)
+4. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (Known Issue #18), axial aberration flag misreference (Known Issue #19)
 5. Phase 2: Depth image caching for Flame drag responsiveness improvement

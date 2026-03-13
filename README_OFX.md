@@ -119,6 +119,8 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 4 | Axial Aberration Type switching has no color change | Protobuf enum (0,1,2) vs Rust internal enum (1,2,3) off-by-one. All protobuf values fall through to `RedBlue`. Rendering function itself supports all 3 colors |
 | 6 | CPU/GPU ~1px pixel drift | Minor rendering difference between CPU and GPU backends. Same behavior in NDK |
 | 7 | Size Multiplier bokeh breakdown at large values | Bokeh collapses or grey regions appear at large Size Multiplier values. Normal when equivalent size is set via Size/MaxSize parameters. Similar symptom in NDK |
+| 18 | Catseye applied when disabled (Barndoor interaction) | `calculate_catseye()` in the kernel is called unconditionally without checking `CATSEYE_ENABLED` flag. When Barndoor Enable=on triggers the non-uniform path, catseye effects are applied even with Catseye Enable=off. Barndoors and Astigmatism correctly check their enable flags |
+| 19 | Axial Aberration enable flag checks wrong bitflag | `get_axial_aberration_settings()` checks `BARNDOORS_ENABLED` instead of the correct flag (copy-paste error in `internal_settings.rs`) |
 
 ### Architecture
 
