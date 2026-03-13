@@ -76,15 +76,15 @@ target_link_libraries(OpenDefocus PRIVATE
 
 # --- Bundle installation ---
 set(ARCHDIR "Linux-x86-64")
-set(BUNDLE_DIR "${BUNDLE_ROOT}/OpenDefocusOFX_stripe.ofx.bundle/Contents/${ARCHDIR}")
+set(BUNDLE_DIR "${BUNDLE_ROOT}/OpenDefocusOFX.ofx.bundle/Contents/${ARCHDIR}")
 
 add_custom_command(TARGET OpenDefocus POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${BUNDLE_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:OpenDefocus>" "${BUNDLE_DIR}/OpenDefocusOFX_stripe.ofx"
-    COMMENT "Copying OpenDefocusOFX_stripe.ofx to bundle")
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:OpenDefocus>" "${BUNDLE_DIR}/OpenDefocusOFX.ofx"
+    COMMENT "Copying OpenDefocusOFX.ofx to bundle")
 
 # --- System install target ---
 set(SYSTEM_OFX_DIR "/usr/OFX/Plugins")
 install(FILES "$<TARGET_FILE:OpenDefocus>"
-    DESTINATION "${SYSTEM_OFX_DIR}/OpenDefocusOFX_stripe.ofx.bundle/Contents/${ARCHDIR}"
-    RENAME "OpenDefocusOFX_stripe.ofx")
+    DESTINATION "${SYSTEM_OFX_DIR}/OpenDefocusOFX.ofx.bundle/Contents/${ARCHDIR}"
+    RENAME "OpenDefocusOFX.ofx")

@@ -93,26 +93,43 @@ export OFX_PLUGIN_PATH=/path/to/bundle/parent
 
 ### OFX-Specific
 
-- **Pixel drift**: A ~1px offset exists between NDK and OFX outputs due to OFX standard coordinate system compliance. This is not a bug.
+| # | Issue | Status | Detail |
+|---|-------|--------|--------|
+| 5 | NDK/OFX ~1px pixel drift | DEFERRED | OFX standard coordinate system compliance; imperceptible at 2K+ |
+| 8 | Stripe boundary seam | FIXED | Fixed with source_image snapshot + global coordinates in stripe RenderSpecs |
+| 9 | Filter Preview buffer overflow | FIXED | Buffer size calculation corrected |
+| 10 | Bokeh parameter grayout not restoring | FIXED | Visibility logic corrected |
+| 11 | Filter Preview black in Depth mode | FIXED | State initialization corrected |
 
 ### Upstream-Originated (DEFERRED)
 
 The following issues originate from the OpenDefocus Rust core and affect both NDK and OFX versions equally. Per porting policy, these are preserved as-is.
 
-| Issue | Detail |
-|-------|--------|
-| Gamma Correction has no effect | Protobuf-defined but not connected to rendering pipeline |
-| Focal Plane Offset has no effect | NDK knob created but not connected to ConvolveSettings |
-| Bokeh Noise has no effect | `noise` feature flag not enabled in upstream crate |
-| Axial Aberration Type switching has no color change | Protobuf/Rust enum off-by-one mapping |
-| CPU/GPU ~1px pixel drift | Minor rendering difference between CPU and GPU backends |
-| Size Multiplier bokeh breakdown at large values | Upstream kernel interaction issue |
+| # | Issue | Detail |
+|---|-------|--------|
+| 1 | Gamma Correction has no effect | Protobuf-defined but not connected to rendering pipeline. Per-axis gamma (Catseye/Barndoors/Astigmatism) works correctly |
+| 2 | Focal Plane Offset has no effect | NDK knob created but not connected to ConvolveSettings. Same symptom confirmed in NDK |
+| 3 | Bokeh Noise has no effect | `noise` feature flag not enabled in upstream `opendefocus` crate. `apply_noise()` implementation exists in `bokeh-creator` but is stubbed out |
+| 4 | Axial Aberration Type switching has no color change | Protobuf enum (0,1,2) vs Rust internal enum (1,2,3) off-by-one. All protobuf values fall through to `RedBlue`. Rendering function itself supports all 3 colors |
+| 6 | CPU/GPU ~1px pixel drift | Minor rendering difference between CPU and GPU backends. Same behavior in NDK |
+| 7 | Size Multiplier bokeh breakdown at large values | Bokeh collapses or grey regions appear at large Size Multiplier values. Normal when equivalent size is set via Size/MaxSize parameters. Similar symptom in NDK |
+
+### Architecture
+
+| # | Issue | Status | Detail |
+|---|-------|--------|--------|
+| 14 | UHD GPU failure (wgpu 128MB limit) | FIXED | Resolved by stripe-based rendering |
+| 15 | UHD CPU extreme slowdown | FIXED | Resolved by stripe-based rendering |
+| 16 | Flame crosshair drag responsiveness | IDENTIFIED | OFX API requires `fetchImage()` which triggers full node tree re-evaluation. NDK version accesses NUKE's scanline cache directly at zero cost. Fundamental OFX API limitation; current performance is acceptable (UAT 30.19 PASS) |
 
 ### Flame: Known Limitations
 
-- **Filter Type = Image is not usable in Flame**: Flame rejects input clips with different resolutions (`Unsupported input resolution mix in node`). This is a Flame platform limitation — commercial plugins (BorisFX Sapphire, Frischluft Lenscare) exhibit the same error. Even if the Filter image is resized to match the Source resolution, the non-square aspect ratio (e.g., 1920x1080) causes the bokeh shape to appear distorted, because the upstream Rust core calculates `filter_aspect_ratio` from the filter image dimensions. Use the built-in filter types (Simple, Disc, Blade) in Flame instead.
+| # | Issue | Status | Detail |
+|---|-------|--------|--------|
+| 12 | Filter Type = Image resolution mismatch error | DEFERRED | Flame validates input clip resolutions at graph connection level before OFX actions are called, ignoring `setSupportsMultiResolution(true)`. Commercial plugins (BorisFX Sapphire, Frischluft Lenscare) exhibit the same error. Not fixable via OFX API |
+| 13 | Filter Type = Image aspect ratio distortion | DEFERRED | Flame requires Filter image to match Source resolution, but upstream Rust core calculates `filter_aspect_ratio` from filter image dimensions (`filter_resolution.x / filter_resolution.y`). Non-square filter images produce distorted bokeh. Frischluft Lenscare avoids this with custom filter processing |
 
-For full details, see `references/known_issues.md`.
+**Filter Type = Image is not usable in Flame.** Use the built-in filter types (Simple, Disc, Blade) instead.
 
 ## Project Structure
 
