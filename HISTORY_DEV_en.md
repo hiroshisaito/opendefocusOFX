@@ -1451,15 +1451,88 @@ make -j$(nproc)
 
 **Result:** UAT with the binary containing all fixes (source_image snapshot, padding +4, render_region expand(2), zero-based coordinates) confirmed **no seams in NUKE**.
 
+#### Debug Log Removal and CMake DEPENDS Fix
+
+- Removed debug logging at 4 locations (file output to `/tmp/stripe_debug.log`)
+- Removed `use std::io::Write` import
+- CMake: Changed from `add_custom_command(OUTPUT) + add_custom_target(DEPENDS)` to `add_custom_target(rust_bridge ALL ...)`. Since cargo handles incremental compilation internally, running cargo every build is idempotent. This fundamentally eliminates missed Rust source change detection.
+
+#### Position-Dependent Effect Seam Fix (Global Coordinates)
+
+**Problem:** Horizontal seams appeared when astigmatism, catseye, or barndoors were enabled.
+
+**Cause:** Each stripe's `full_region.y` was always set to `0`, causing `get_real_coordinates()` to treat all stripes as the top of the image. Position-dependent effects vary bokeh shape based on screen coordinates, so stripes beyond the first used incorrect coordinates.
+
+**Fix:** Changed to use global coordinates matching upstream ChunkHandler convention:
+- `full_region = {x: fr[0], y: y_in, z: fr[2], w: y_in_end}` — absolute Y coordinates
+- `render_region = {x: rr[0]-2, y: y_out-2, z: rr[2]+2, w: y_out_end+2}` — absolute Y coordinates + expand(2)
+
+**Verification:** The engine's image/depth slicing in `engine.rs` converts global to local via `chunk.full_region.y - self.render_specs.full_region.y`, so buffer access is unaffected. `center` (optical center) uses the global value directly from `settings.render.center` and is stripe-independent.
+
+#### 4K-DCP Vertical Boundary Issue
+
+**Problem:** A vertical boundary line appears on the right side of the image when rendering 4K-DCP (4096×2160) with Size=160.
+
+**Root Cause Analysis:** The C++ fetchWindow expanded the renderWindow by margin (ceil(effectiveRadius)+1) in both X and Y directions. For 4K-DCP + Size=160, bufWidth = 4096 + 2×161 = 4418, exceeding the upstream ChunkHandler limit (4096) and triggering a horizontal split. The chunk boundary produces a visible vertical seam.
+
+**First Fix Attempt (v2):** Removed X-axis margin from fetchWindow expansion. Only Y-axis margin is added (Rust stripe code handles Y padding). X-axis edge handling was expected to be provided equivalently by wgpu texture `ClampToEdge` sampler.
+
+**Result:** Boundary line position shifted but was not fully eliminated.
+
+**Second Investigation (v3):** Debug logging added to capture runtime geometry values:
+```
+rw=[-12,-12,4108,2172] fetchWindow=[-12,-173,4108,2333] buf=4120x2506 margin=161
+```
+Even with X margin removed, NUKE's renderWindow itself includes overscan (-12 to 4108 = width 4120px). bufWidth=4120 > 4096, so ChunkHandler splitting persisted. v3 testing revealed both vertical and horizontal boundaries — the right chunk underwent independent stripe processing, producing horizontal seams as well.
+
+**Root Cause:** The upstream ChunkHandler processes chunks in-place sequentially. Chunk N's blurred output contaminates chunk N+1's padding region, causing "double blur" seams at chunk boundaries. OFX stripe splitting solves this with `source_image` snapshot, but ChunkHandler internals cannot be modified (upstream code).
+
+**Final Fix (v4):**
+1. **Cap fetchWindow X width to 4096** — Symmetrically trim overscan to fundamentally prevent ChunkHandler horizontal splitting.
+   ```cpp
+   if (bufWidth > 4096) {
+       int excess = bufWidth - 4096;
+       fetchWindow.x1 += excess / 2;
+       fetchWindow.x2 -= (excess - excess / 2);
+       bufWidth = 4096;
+   }
+   ```
+2. **Clamp renderRegion to buffer bounds** — Handle cases where rw extends beyond fetchWindow after trimming.
+3. **Edge-replicate overscan in output copy** — For trimmed overscan regions, replicate buffer edge pixels using ClampToEdge approach for both left and right overscan zones.
+4. **Remove debug logging** — Removed `/tmp/ofx_render_debug.log` output.
+
+### 2026-03-13: Flame Filter Image Resolution Mix Error Investigation
+
+**Issue:** Flame reports `Unsupported input resolution mix in node` when Filter Type = Image is set and the Filter clip (e.g., 256x256 bokeh image) has a different resolution from the Source clip (e.g., 1920x1080). NUKE handles the same configuration without error.
+
+**Investigation:** Three OFX-level fixes were attempted:
+
+1. `getClipPreferences()` override — Output format declaration → No effect
+2. `getRegionOfDefinition()` override — Source-only RoD → No effect
+3. Host capability checks for `setClipBitDepth` / `setPixelAspectRatio` → No effect
+
+**Conclusion: Flame Platform Limitation.** Commercial OFX defocus plugins (BorisFX Sapphire, Frischluft Lenscare) exhibit the same error in Flame. Flame validates input clip resolutions at the graph level before OFX actions are called, ignoring `setSupportsMultiResolution(true)`. This is not fixable via OFX API.
+
+**Code retained:** `getClipPreferences()` and `getRegionOfDefinition()` overrides remain as they are correct OFX practice and benefit other hosts.
+
+**Flame workaround:** Users must resize Filter images to match Source resolution before connecting.
+
+**Known sub-issues with same-resolution filter in Flame:**
+- Filter shape appears vertically squished (aspect ratio distortion vs NUKE)
+- "No filter provided" error in some configurations (filter clip data not reaching Rust bridge)
+
+**Detail:** See `references/flame_filter_resolution_fix.md` for full investigation notes.
+
 ### Current Status
 
 - **Phase 11 (Focus Point XY Picker)**: UAT complete, all items PASS (main branch)
-- **Performance Optimization Phase 1**: Stripe-based rendering implementation complete, no seams confirmed in NUKE (feature/stripe-rendering branch). Remaining work: debug log removal and CMake DEPENDS fix.
+- **Performance Optimization Phase 1**: Stripe-based rendering implementation complete. Debug log removal and CMake DEPENDS fix done. Position-dependent effect seam fix done (global coordinates). 4K-DCP boundary issue fixed (fetchWindow X width cap). Awaiting UAT retest.
+- **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Same-resolution filter shape distortion and data delivery issues remain open.
 
 ### Next Steps
 
-1. Phase 1: Remove debug logging, fix CMake DEPENDS (auto-rebuild on Rust source changes)
-2. Phase 1: Full UAT retest (items 32.1–32.18)
+1. Phase 1: Full UAT retest (items 32.1–32.18 + 32.12a)
+2. Flame same-resolution Filter issues investigation (shape distortion, data delivery)
 3. Phase 2: Depth image caching for Flame drag responsiveness improvement
 4. Release preparation (build procedure documentation, distribution bundle packaging)
 5. Investigation and fix of Filter Preview overflow issue

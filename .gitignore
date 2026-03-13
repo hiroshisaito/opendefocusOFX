@@ -24,8 +24,11 @@ plugin/OpenDefocusOFX/cmake/
 rust/opendefocus-ofx-bridge/target/
 Cargo.lock
 
-# References (local PDFs)
+# References (local working files)
 references/
+# Exception: tracked reference docs
+!references/flame_filter_resolution_fix.md
+!references/known_issues.md
 
 # IDE
 .vscode/
@@ -40,6 +43,10 @@ references/
 # Dependencies
 node_modules/
 .env
+
+# Japanese docs (local only)
+HISTORY_DEV_ja.md
+UAT_checklist_ja.md
 
 # Claude Code
 .claude/
