@@ -1518,22 +1518,71 @@ Even with X margin removed, NUKE's renderWindow itself includes overscan (-12 to
 **Flame workaround:** Users must resize Filter images to match Source resolution before connecting.
 
 **Known sub-issues with same-resolution filter in Flame:**
-- Filter shape appears vertically squished (aspect ratio distortion vs NUKE)
-- "No filter provided" error in some configurations (filter clip data not reaching Rust bridge)
 
-**Detail:** See `references/flame_filter_resolution_fix.md` for full investigation notes.
+1. **Filter shape aspect ratio distortion (upstream-caused):** When Filter image is resized to match Source resolution (e.g., 1920×1080), the non-square aspect ratio causes bokeh shape distortion. Root cause: upstream Rust core calculates `filter_aspect_ratio = filter_resolution.x / filter_resolution.y` (`opendefocus-datastructure/src/lib.rs:265`), so non-square filter images produce distorted bokeh. Frischluft Lenscare does not exhibit this distortion (custom filter processing). Not fixable without upstream changes. DEFERRED.
+2. **"No filter provided" error:** Occurs when the Filter clip input is temporarily disconnected. Normal behavior — `filterClip_->isConnected()` returns false, so no filter data is passed to Rust. Not an issue.
+
+**Total judgment: Filter Type = Image is not usable in Flame.** Use built-in filter types (Simple, Disc, Blade) instead.
+
+### 2026-03-13: Stripe-Based Rendering UAT Complete
+
+Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
+
+#### UAT Result Summary
+
+| Category | Result |
+|----------|--------|
+| Stripe-Based Rendering (18 items, Section 32) | 15 PASS / 2 DEFERRED / 1 N/A |
+
+#### Results by Item
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 32.1 | HD GPU rendering | PASS | Output matches NDK |
+| 32.2 | HD CPU rendering | PASS | UseGPU=false |
+| 32.3 | UHD GPU rendering | PASS | Previously failed due to wgpu 128MB limit |
+| 32.4 | UHD CPU rendering | PASS | No hang or extreme slowdown |
+| 32.5 | Quality=Low (256px stripe) | PASS | No seams |
+| 32.6 | Quality=Medium (128px stripe) | PASS | No seams |
+| 32.7 | Quality=High (64px stripe) | PASS | No seams |
+| 32.8 | Mode=2D (no Depth) | PASS | |
+| 32.9 | Depth + FocalPlaneSetup (32px stripe) | PASS | |
+| 32.10 | Filter Type=Image | DEFERRED | Flame Filter Image limitation (upstream) |
+| 32.11 | Catseye stripe boundary | PASS | No seams with position-dependent effect |
+| 32.12 | Barndoors stripe boundary | PASS | No seams |
+| 32.12a | Astigmatism stripe boundary | PASS | No seams (global coordinates fix verified) |
+| 32.13 | Proxy mode (1/2, 1/4) | PASS | renderScale correctly applied |
+| 32.14 | Abort between stripes | PASS | |
+| 32.15 | Extreme bokeh size (500+) | PASS | Large padding, no crash |
+| 32.16 | GPU fallback in stripe loop | N/A | GPU succeeds even at 10K+ — cannot trigger fallback. 12K hits NUKE host buffer limit |
+| 32.17 | Multi-frame rendering | PASS | Flipbook/Write stable |
+| 32.18 | Flame stripe rendering | DEFERRED | Flame Filter Image limitation |
+
+#### Key Results
+
+- **UHD GPU rendering now works** — stripe splitting keeps each buffer under 128MB
+- **All position-dependent effects (catseye, barndoors, astigmatism)** render seamlessly across stripe boundaries — global coordinates fix verified
+- **GPU fallback (32.16) reclassified as N/A** — stripe splitting resolves the root cause (buffer size), so GPU failure cannot be triggered even at 10K+. The 12K "Asked for too-large image input" error is a NUKE host-side limit, not a plugin issue
+- **DEFERRED items (32.10, 32.18)** are both caused by the known Flame Filter Image platform limitation, not stripe-specific issues
 
 ### Current Status
 
-- **Phase 11 (Focus Point XY Picker)**: UAT complete, all items PASS (main branch)
-- **Performance Optimization Phase 1**: Stripe-based rendering implementation complete. Debug log removal and CMake DEPENDS fix done. Position-dependent effect seam fix done (global coordinates). 4K-DCP boundary issue fixed (fetchWindow X width cap). Awaiting UAT retest.
-- **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Same-resolution filter shape distortion and data delivery issues remain open.
+- **Phase 1–11 (OFX Port)**: Complete, UAT complete (main branch)
+- **Performance Optimization Phase 1 (Stripe Rendering)**: Implementation complete, UAT complete (`feature/stripe-rendering` branch)
+- **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Filter aspect ratio distortion is upstream-caused (DEFERRED). Total judgment: not usable in Flame.
+
+### OFX-Side Unresolved
+
+| Item | Details | Priority |
+|------|---------|----------|
+| Filter Preview overflow (27.8) | Preview ignores filter size and fills entire screen in proxy mode | Medium |
+| Use GPU log not output (28.4/28.5) | `log::info!` does not reach host console | Low (no functional impact) |
+| od_is_gpu_active status display (26.8) | No UI to display GPU active status | Low |
 
 ### Next Steps
 
-1. Phase 1: Full UAT retest (items 32.1–32.18 + 32.12a)
-2. Flame same-resolution Filter issues investigation (shape distortion, data delivery)
-3. Phase 2: Depth image caching for Flame drag responsiveness improvement
-4. Release preparation (build procedure documentation, distribution bundle packaging)
-5. Investigation and fix of Filter Preview overflow issue
-6. Upstream Rust core investigation (pixel drift, enum misalignment, unwired parameters)
+1. Merge `feature/stripe-rendering` → `master` (revert `_stripe` postfix to original names)
+2. Phase 2: Depth image caching for Flame drag responsiveness improvement
+3. Release preparation (build procedure documentation, distribution bundle packaging)
+4. Investigation and fix of Filter Preview overflow issue (27.8)
+5. Upstream Rust core investigation (pixel drift, enum misalignment, unwired parameters)

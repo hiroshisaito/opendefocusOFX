@@ -27,9 +27,9 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-static const char* kPluginName       = "OpenDefocusOFX_stripe";
+static const char* kPluginName       = "OpenDefocusOFX";
 static const char* kPluginGrouping   = "OpenDefocusOFX";
-static const char* kPluginIdentifier = "com.opendefocus.ofx.stripe";
+static const char* kPluginIdentifier = "com.opendefocus.ofx";
 static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
