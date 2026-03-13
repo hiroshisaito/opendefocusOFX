@@ -1124,8 +1124,10 @@ void OpenDefocusPlugin::getClipPreferences(
     OFX::ClipPreferencesSetter& clipPreferences)
 {
     // Explicitly declare output format to match Source clip.
-    // Required by Flame when input clips have different resolutions
-    // (e.g., Source=1920x1080, Filter=256x256).
+    // Standard OFX best practice for multi-input plugins.
+    // Note: does NOT resolve Flame's "Unsupported input resolution mix"
+    // error — Flame validates clip resolutions at graph level before
+    // calling getClipPreferences.  See references/flame_filter_resolution_fix.md.
     clipPreferences.setClipComponents(*dstClip_, srcClip_->getPixelComponents());
 
     // setClipBitDepth / setPixelAspectRatio require host capability flags;
@@ -1145,8 +1147,10 @@ bool OpenDefocusPlugin::getRegionOfDefinition(
 {
     // Output RoD = Source clip's RoD only.
     // Without this override the default is the union of all input RoDs,
-    // which causes Flame to reject the "input resolution mix" when the
-    // Filter clip (bokeh image) has a different resolution than Source.
+    // which can cause unexpected output dimensions with multi-resolution
+    // inputs.  Note: does NOT resolve Flame's "Unsupported input
+    // resolution mix" error — Flame validates at graph level before
+    // calling getRegionOfDefinition.  See references/flame_filter_resolution_fix.md.
     if (srcClip_ && srcClip_->isConnected()) {
         rod = srcClip_->getRegionOfDefinition(args.time);
         return true;

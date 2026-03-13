@@ -1,8 +1,10 @@
 # OpenDefocus OFX
 
+**Version: v0.1.10-OFX-v1**
+
 OpenFX port of [OpenDefocus](https://codeberg.org/gillesvink/opendefocus) — an advanced open-source convolution library for image post-processing.
 
-This project brings the OpenDefocus Rust core to any OFX-compatible host application (NUKE, Flame, DaVinci Resolve, etc.) via an extern "C" FFI bridge.
+This project brings the OpenDefocus Rust core to OFX-compatible host applications via an extern "C" FFI bridge. Tested and supported on **NUKE** and **Flame**. Other OFX hosts may work but are untested.
 
 ## Porting Policy
 
@@ -81,13 +83,17 @@ export OFX_PLUGIN_PATH=/path/to/bundle/parent
 
 | Aspect | NDK Version | OFX Version |
 |--------|------------|-------------|
-| Host | NUKE only | Any OFX host (NUKE, Flame, Resolve, etc.) |
+| Host | NUKE only | Tested: NUKE, Flame (other OFX hosts may work but are untested) |
 | Language | Rust + C++ (CXX FFI) | Rust + C++ (extern "C" FFI) |
 | Stripe splitting | NUKE host provides stripes | Plugin-internal stripe loop in `od_render()` |
 | Camera Mode | Supported (NUKE camera data) | Omitted (host-dependent) |
 | GPU acceleration | Vulkan/Metal via wgpu | Same (Vulkan/Metal via wgpu) |
 | Build system | `cargo xtask` | CMake + cargo |
 | Parameter UI | NUKE knobs | OFX parameter API |
+
+### renderScale
+
+The plugin uses `renderScale.x` only (assumes uniform scaling). NUKE and Flame always provide `renderScale.x == renderScale.y`. Hosts that use non-uniform renderScale (non-square pixels) may produce distorted output.
 
 ## Known Issues
 
@@ -121,6 +127,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 14 | UHD GPU failure (wgpu 128MB limit) | FIXED | Resolved by stripe-based rendering |
 | 15 | UHD CPU extreme slowdown | FIXED | Resolved by stripe-based rendering |
 | 16 | Flame crosshair drag responsiveness | IDENTIFIED | OFX API requires `fetchImage()` which triggers full node tree re-evaluation. NDK version accesses NUKE's scanline cache directly at zero cost. Fundamental OFX API limitation; current performance is acceptable (UAT 30.19 PASS) |
+| 17 | Render abort not implemented | IDENTIFIED | OFX version does not call the host `abort()` API during rendering. User cancellation during rendering is not reflected. NDK version polls `node.aborted()` every 10ms via a background task. Phase 2 implementation planned using callback-based abort propagation |
 
 ### Flame: Known Limitations
 

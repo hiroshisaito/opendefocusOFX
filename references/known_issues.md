@@ -29,6 +29,7 @@
 | 14 | UHD GPU 失敗 (wgpu 128MB 制限) | Architecture | FIXED | stripe rendering で解決 |
 | 15 | UHD CPU 極端な低速 | Architecture | FIXED | stripe rendering で解決 |
 | 16 | Flame crosshair ドラッグ応答性 | Architecture | IDENTIFIED | OFX API 制約 |
+| 17 | レンダー中 abort 未実装 | Architecture | IDENTIFIED | OFX abort() 未呼び出し |
 
 ---
 
@@ -86,7 +87,7 @@
 - **原因**: ストライプ間パディング領域の汚染、position-dependent 効果でのローカル座標問題
 - **修正**: source_image スナップショット + global coordinates in stripe RenderSpecs
 - **コミット**: f60776d
-- **再テスト**: 32.1-32.18 + 32.12a 待ち
+- **再テスト**: 32.1-32.18 + 32.12a 完了 (2026-03-13 UAT PASS)
 
 ### 9-11. Filter Preview / パラメータ関連
 
@@ -128,3 +129,14 @@ stripe-based rendering で解決済み。詳細は OPTIMIZATION_REPORT.md 参照
 - NDK 版は NUKE のスキャンラインキャッシュに直接アクセス → ゼロコストサンプリング
 - OFX API の制約であり、根本的な解決は不可能
 - 現状は実用上許容範囲 (UAT 30.19 PASS)
+
+### 17. レンダー中 abort 未実装 (IDENTIFIED)
+
+- OFX 版は C++ 側でホストの `abort()` API を呼んでいない
+- Rust 側は `od_render()` 開始時に `set_aborted(false)` でリセットし、ストライプループ冒頭で `get_aborted()` をチェックするが、外部から `true` にする経路がない
+- NDK 版は tokio タスクで 10ms 間隔で `node.aborted()` をポーリングし、`set_aborted(true)` を設定
+- Phase 2 で `user_data` 付き C callback 方式による abort 実装を予定
+- Phase 2 開始条件:
+  1. callback FFI 設計の確定（`bool (*abort_check_fn)(void*)` + `void* user_data`）
+  2. `OdResult::Aborted` 戻り値と C++ 側の処理（overscan-safe な deterministic fallback）の設計
+  3. fine-grained polling を行う場合、NUKE/Flame で `abort()` の別スレッド呼び出し安全性を実測確認

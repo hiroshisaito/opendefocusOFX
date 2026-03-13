@@ -390,25 +390,25 @@
 
 | # | Test Item | Result | Notes |
 |---|-----------|--------|-------|
-| 32.1 | HD (1920×1080) GPU rendering produces equivalent output to existing results | RETEST | Compare with NDK original, or cross-compare Quality levels (Low/Medium/High) for identical output |
-| 32.2 | HD (1920×1080) CPU rendering produces equivalent output to existing results | RETEST | Use GPU=false. Compare with NDK original, or cross-compare Quality levels |
+| 32.1 | HD (1920×1080) GPU rendering produces equivalent output to existing results | PASS | Compare with NDK original, or cross-compare Quality levels (Low/Medium/High) for identical output |
+| 32.2 | HD (1920×1080) CPU rendering produces equivalent output to existing results | PASS | Use GPU=false. Compare with NDK original, or cross-compare Quality levels |
 | 32.3 | UHD (3840×2160) GPU rendering succeeds | PASS | Previously failed due to wgpu storage buffer limit exceeded. UHD GPU rendering now possible. |
 | 32.4 | UHD (3840×2160) CPU rendering completes at practical speed | PASS | No hang or extreme delay |
-| 32.5 | Quality=Low (stripe 256px) renders correctly | RETEST | No seams at stripe boundaries. Retest needed after build system fix. |
-| 32.6 | Quality=Medium (stripe 128px) renders correctly | RETEST | No seams at stripe boundaries. Retest needed after build system fix. |
-| 32.7 | Quality=High (stripe 64px) renders correctly | RETEST | No seams at stripe boundaries. Retest needed after build system fix. |
-| 32.8 | Mode=2D (no Depth) stripe splitting works correctly | RETEST | Retest needed after build system fix. |
-| 32.9 | Mode=Depth + RenderResult=Focal Plane Setup (stripe 32px) renders correctly | RETEST | Retest needed after build system fix. |
-| 32.10 | Filter Type=Image: filter applied consistently across stripes | RETEST | Combined with custom Bokeh image input. Retest needed after build system fix. |
-| 32.11 | Catseye Enable=true: continuous stripe boundaries (no seams) | RETEST | Non-uniform bokeh stripe boundary verification. Retest needed after build system fix. |
-| 32.12 | Barndoors Enable=true: continuous stripe boundaries (no seams) | RETEST | Non-uniform bokeh stripe boundary verification. Retest needed after build system fix. |
-| 32.12a | Astigmatism Enable=true: continuous stripe boundaries (no seams) | RETEST | Non-uniform bokeh stripe boundary verification. Retest needed after global coordinate fix. |
-| 32.13 | Proxy mode (1/2, 1/4) renderScale correctly applied | RETEST | Combination with stripe splitting. Retest needed after build system fix. |
-| 32.14 | Abort during rendering responds immediately between stripes | RETEST | Inter-stripe abort check. Retest needed after build system fix. |
-| 32.15 | No crash with extreme bokeh size (Size=500+) with large padding | PASS | Rendering takes time but completes without crash. Padding > stripe height case. |
-| 32.16 | CPU fallback on GPU failure works correctly within stripe loop | FAIL | GPU rendering succeeded even at 10K+, could not test fallback. Around 12K, NUKE error "Asked for too-large ... image input". |
-| 32.17 | Multi-frame rendering (Flipbook/Write) with stripe splitting operates stably | RETEST | No crash or data cross-contamination between frames. Retest needed after build system fix. |
-| 32.18 | Stripe-based rendering works correctly in Flame | RETEST | Retest needed after build system fix. Previous issue: significant performance degradation from plugin load. |
+| 32.5 | Quality=Low (stripe 256px) renders correctly | PASS | No seams at stripe boundaries |
+| 32.6 | Quality=Medium (stripe 128px) renders correctly | PASS | No seams at stripe boundaries |
+| 32.7 | Quality=High (stripe 64px) renders correctly | PASS | No seams at stripe boundaries |
+| 32.8 | Mode=2D (no Depth) stripe splitting works correctly | PASS | |
+| 32.9 | Mode=Depth + RenderResult=Focal Plane Setup (stripe 32px) renders correctly | PASS | |
+| 32.10 | Filter Type=Image: filter applied consistently across stripes | DEFERRED | Flame Filter Image limitation (upstream) and aspect ratio distortion. Not a stripe-specific issue |
+| 32.11 | Catseye Enable=true: continuous stripe boundaries (no seams) | PASS | Non-uniform bokeh stripe boundary verification |
+| 32.12 | Barndoors Enable=true: continuous stripe boundaries (no seams) | PASS | Non-uniform bokeh stripe boundary verification |
+| 32.12a | Astigmatism Enable=true: continuous stripe boundaries (no seams) | PASS | Non-uniform bokeh stripe boundary verification. Global coordinate fix verified |
+| 32.13 | Proxy mode (1/2, 1/4) renderScale correctly applied | PASS | Combination with stripe splitting |
+| 32.14 | Abort during rendering responds immediately between stripes | DEFERRED | OFX version does not call host abort() API. Render-time abort is unimplemented (Known Issue #17). Phase 2 planned |
+| 32.15 | No crash with extreme bokeh size (Size=500+) with large padding | PASS | Rendering takes time but completes without crash. Padding > stripe height case |
+| 32.16 | CPU fallback on GPU failure works correctly within stripe loop | N/A | Stripe splitting resolves root cause (buffer size), GPU succeeds even at 10K+. Cannot trigger fallback. 12K hits NUKE host buffer limit ("Asked for too-large image input") |
+| 32.17 | Multi-frame rendering (Flipbook/Write) with stripe splitting operates stably | PASS | No crash or data cross-contamination between frames |
+| 32.18 | Stripe-based rendering works correctly in Flame | DEFERRED | Flame Filter Image platform limitation. Non-Filter-Image rendering works correctly |
 
 ## 31. Known Constraints (Out of Scope for This Version)
 
@@ -469,6 +469,14 @@ The following are not implemented in v0.1.10-OFX-v1 and are out of test scope:
 | 24.5 | Depth mode comparison with CPU version | Test environment constraint | N/A — Same as above |
 | 24.9 | Filter Preview black screen | Depth mode validate error | PASS — Fixed by setting od_set_defocus_mode(TWO_D) before preview. Retest passed |
 | 24.15 | CPU fallback on GPU-unsupported environment | Test environment constraint | N/A — GPU environment (Linux) only. Cannot verify |
+
+## FAIL Item Summary (Stripe-Based Rendering UAT)
+
+| # | Item | Category | Status |
+|---|------|----------|--------|
+| 32.10 | Filter Type=Image stripe consistency | Flame platform limitation | DEFERRED — Flame Filter Image resolution mix error and upstream aspect ratio distortion. Not stripe-specific |
+| 32.16 | GPU fallback in stripe loop | Test expectation update | N/A — Stripe splitting resolves buffer size issue, GPU succeeds even at 10K+. 12K error is NUKE host buffer limit |
+| 32.18 | Flame stripe rendering | Flame platform limitation | DEFERRED — Flame Filter Image limitation. Non-Filter-Image rendering works correctly |
 
 ### Status Legend
 
@@ -562,3 +570,12 @@ A ~1px pixel offset was confirmed between NUKE NDK and OFX versions. The OFX ver
 | Verdict Date | Mar 1 2026 |
 | Verdicted By | Hiroshi |
 | Notes | Filter Image (9 PASS), GPU Stabilization (8 PASS / 1 unknown), RenderScale+RoI (15 PASS / 2 FAIL / 1 untested), Use GPU (7 PASS / 3 FAIL), Thread Safety (5 PASS). FAIL: 27.6 SizeMultiplier bokeh breakdown (DEFERRED/upstream), 27.8 Filter Preview overflow (needs investigation), 28.4/28.5 log not output (low priority), 28.6 CPU/GPU pixel drift (DEFERRED/upstream). OFX porting mission complete |
+
+### Stripe-Based Rendering UAT
+
+| Item | Result |
+|------|--------|
+| Overall Verdict | PASS |
+| Verdict Date | Mar 13 2026 |
+| Verdicted By | Hiroshi |
+| Notes | Stripe-based rendering (14 PASS / 3 DEFERRED / 1 N/A). UHD GPU rendering now works. All position-dependent effects (catseye, barndoors, astigmatism) seamless across stripe boundaries. DEFERRED: 32.10/32.18 are Flame Filter Image platform limitation, not stripe-specific. 32.14 abort unimplemented (Known Issue #17, Phase 2). N/A: 32.16 GPU fallback cannot be triggered (stripe splitting resolves root cause) |

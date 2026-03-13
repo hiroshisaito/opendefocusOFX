@@ -1532,7 +1532,7 @@ Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
 
 | Category | Result |
 |----------|--------|
-| Stripe-Based Rendering (18 items, Section 32) | 15 PASS / 2 DEFERRED / 1 N/A |
+| Stripe-Based Rendering (18 items, Section 32) | 14 PASS / 3 DEFERRED / 1 N/A |
 
 #### Results by Item
 
@@ -1552,7 +1552,7 @@ Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
 | 32.12 | Barndoors stripe boundary | PASS | No seams |
 | 32.12a | Astigmatism stripe boundary | PASS | No seams (global coordinates fix verified) |
 | 32.13 | Proxy mode (1/2, 1/4) | PASS | renderScale correctly applied |
-| 32.14 | Abort between stripes | PASS | |
+| 32.14 | Abort between stripes | DEFERRED | OFX abort() unimplemented (Known Issue #17). Phase 2 planned |
 | 32.15 | Extreme bokeh size (500+) | PASS | Large padding, no crash |
 | 32.16 | GPU fallback in stripe loop | N/A | GPU succeeds even at 10K+ — cannot trigger fallback. 12K hits NUKE host buffer limit |
 | 32.17 | Multi-frame rendering | PASS | Flipbook/Write stable |
@@ -1564,12 +1564,14 @@ Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
 - **All position-dependent effects (catseye, barndoors, astigmatism)** render seamlessly across stripe boundaries — global coordinates fix verified
 - **GPU fallback (32.16) reclassified as N/A** — stripe splitting resolves the root cause (buffer size), so GPU failure cannot be triggered even at 10K+. The 12K "Asked for too-large image input" error is a NUKE host-side limit, not a plugin issue
 - **DEFERRED items (32.10, 32.18)** are both caused by the known Flame Filter Image platform limitation, not stripe-specific issues
+- **32.14 reclassified as DEFERRED** — OFX abort() is unimplemented (Known Issue #17). Phase 2 planned with callback-based abort propagation
 
 ### Current Status
 
-- **Phase 1–11 (OFX Port)**: Complete, UAT complete (main branch)
-- **Performance Optimization Phase 1 (Stripe Rendering)**: Implementation complete, UAT complete (`feature/stripe-rendering` branch)
-- **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Filter aspect ratio distortion is upstream-caused (DEFERRED). Total judgment: not usable in Flame.
+- **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
+- **Performance Optimization Phase 1 (Stripe Rendering)**: Implementation complete, UAT complete, merged to master
+- **Code Review Phase**: Flame comment correction, README host/renderScale documentation, abort Known Issue #17 added. Abort implementation deferred to Phase 2
+- **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Filter aspect ratio distortion is upstream-caused (DEFERRED). Total judgment: not usable in Flame
 
 ### OFX-Side Unresolved
 
@@ -1581,8 +1583,8 @@ Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
 
 ### Next Steps
 
-1. Merge `feature/stripe-rendering` → `master` (revert `_stripe` postfix to original names)
-2. Phase 2: Depth image caching for Flame drag responsiveness improvement
-3. Release preparation (build procedure documentation, distribution bundle packaging)
-4. Investigation and fix of Filter Preview overflow issue (27.8)
-5. Upstream Rust core investigation (pixel drift, enum misalignment, unwired parameters)
+1. Open test release: v0.1.10-OFX-v1
+2. Phase 2: Abort callback implementation (Known Issue #17)
+3. Investigation and fix of Filter Preview overflow issue (27.8)
+4. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise)
+5. Phase 2: Depth image caching for Flame drag responsiveness improvement

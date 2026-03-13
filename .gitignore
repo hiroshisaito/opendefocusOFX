@@ -44,9 +44,10 @@ references/
 node_modules/
 .env
 
-# Japanese docs (local only)
+# Local docs
 HISTORY_DEV_ja.md
 UAT_checklist_ja.md
+OPTIMIZATION_REPORT.md
 
 # Claude Code
 .claude/
