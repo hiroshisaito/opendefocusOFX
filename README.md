@@ -1,3 +1,5 @@
+> **Note**: This README is inherited from the original OpenDefocus NDK version. For OFX-specific documentation (build instructions, host compatibility, known issues), see [README_OFX.md](README_OFX.md).
+
 <h6 align="center">
   <br>
   <picture>

@@ -1501,15 +1501,39 @@ Even with X margin removed, NUKE's renderWindow itself includes overscan (-12 to
 3. **Edge-replicate overscan in output copy** — For trimmed overscan regions, replicate buffer edge pixels using ClampToEdge approach for both left and right overscan zones.
 4. **Remove debug logging** — Removed `/tmp/ofx_render_debug.log` output.
 
+### 2026-03-13: Flame Filter Image Resolution Mix Error Investigation
+
+**Issue:** Flame reports `Unsupported input resolution mix in node` when Filter Type = Image is set and the Filter clip (e.g., 256x256 bokeh image) has a different resolution from the Source clip (e.g., 1920x1080). NUKE handles the same configuration without error.
+
+**Investigation:** Three OFX-level fixes were attempted:
+
+1. `getClipPreferences()` override — Output format declaration → No effect
+2. `getRegionOfDefinition()` override — Source-only RoD → No effect
+3. Host capability checks for `setClipBitDepth` / `setPixelAspectRatio` → No effect
+
+**Conclusion: Flame Platform Limitation.** Commercial OFX defocus plugins (BorisFX Sapphire, Frischluft Lenscare) exhibit the same error in Flame. Flame validates input clip resolutions at the graph level before OFX actions are called, ignoring `setSupportsMultiResolution(true)`. This is not fixable via OFX API.
+
+**Code retained:** `getClipPreferences()` and `getRegionOfDefinition()` overrides remain as they are correct OFX practice and benefit other hosts.
+
+**Flame workaround:** Users must resize Filter images to match Source resolution before connecting.
+
+**Known sub-issues with same-resolution filter in Flame:**
+- Filter shape appears vertically squished (aspect ratio distortion vs NUKE)
+- "No filter provided" error in some configurations (filter clip data not reaching Rust bridge)
+
+**Detail:** See `references/flame_filter_resolution_fix.md` for full investigation notes.
+
 ### Current Status
 
 - **Phase 11 (Focus Point XY Picker)**: UAT complete, all items PASS (main branch)
 - **Performance Optimization Phase 1**: Stripe-based rendering implementation complete. Debug log removal and CMake DEPENDS fix done. Position-dependent effect seam fix done (global coordinates). 4K-DCP boundary issue fixed (fetchWindow X width cap). Awaiting UAT retest.
+- **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Same-resolution filter shape distortion and data delivery issues remain open.
 
 ### Next Steps
 
 1. Phase 1: Full UAT retest (items 32.1–32.18 + 32.12a)
-2. Phase 2: Depth image caching for Flame drag responsiveness improvement
-3. Release preparation (build procedure documentation, distribution bundle packaging)
-4. Investigation and fix of Filter Preview overflow issue
-5. Upstream Rust core investigation (pixel drift, enum misalignment, unwired parameters)
+2. Flame same-resolution Filter issues investigation (shape distortion, data delivery)
+3. Phase 2: Depth image caching for Flame drag responsiveness improvement
+4. Release preparation (build procedure documentation, distribution bundle packaging)
+5. Investigation and fix of Filter Preview overflow issue
+6. Upstream Rust core investigation (pixel drift, enum misalignment, unwired parameters)

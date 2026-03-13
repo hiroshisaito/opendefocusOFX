@@ -346,6 +346,11 @@ public:
     void getRegionsOfInterest(const OFX::RegionsOfInterestArguments& args,
                               OFX::RegionOfInterestSetter& rois) override;
 
+    void getClipPreferences(OFX::ClipPreferencesSetter& clipPreferences) override;
+
+    bool getRegionOfDefinition(const OFX::RegionOfDefinitionArguments& args,
+                               OfxRectD& rod) override;
+
 private:
     void updateParamVisibility();
 
@@ -898,6 +903,7 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
             OfxRectI fBounds = filterImg->getBounds();
             int fWidth  = fBounds.x2 - fBounds.x1;
             int fHeight = fBounds.y2 - fBounds.y1;
+
             if (fWidth > 0 && fHeight > 0) {
                 filterBuffer.resize(static_cast<size_t>(fWidth) * fHeight * 4);
                 for (int y = fBounds.y1; y < fBounds.y2; ++y) {
@@ -1112,6 +1118,40 @@ void OpenDefocusPlugin::getRegionsOfInterest(
     if (srcClip_)   rois.setRegionOfInterest(*srcClip_, srcRoI);
     if (depthClip_) rois.setRegionOfInterest(*depthClip_, srcRoI);
     // Filter clip: bokeh shape image, no expansion needed
+}
+
+void OpenDefocusPlugin::getClipPreferences(
+    OFX::ClipPreferencesSetter& clipPreferences)
+{
+    // Explicitly declare output format to match Source clip.
+    // Required by Flame when input clips have different resolutions
+    // (e.g., Source=1920x1080, Filter=256x256).
+    clipPreferences.setClipComponents(*dstClip_, srcClip_->getPixelComponents());
+
+    // setClipBitDepth / setPixelAspectRatio require host capability flags;
+    // calling without support throws PropertyUnknownToHost, which would
+    // abort the entire getClipPreferences action.
+    OFX::ImageEffectHostDescription* hostDesc = OFX::getImageEffectHostDescription();
+    if (hostDesc && hostDesc->supportsMultipleClipDepths) {
+        clipPreferences.setClipBitDepth(*dstClip_, srcClip_->getPixelDepth());
+    }
+    if (hostDesc && hostDesc->supportsMultipleClipPARs) {
+        clipPreferences.setPixelAspectRatio(*dstClip_, srcClip_->getPixelAspectRatio());
+    }
+}
+
+bool OpenDefocusPlugin::getRegionOfDefinition(
+    const OFX::RegionOfDefinitionArguments& args, OfxRectD& rod)
+{
+    // Output RoD = Source clip's RoD only.
+    // Without this override the default is the union of all input RoDs,
+    // which causes Flame to reject the "input resolution mix" when the
+    // Filter clip (bokeh image) has a different resolution than Source.
+    if (srcClip_ && srcClip_->isConnected()) {
+        rod = srcClip_->getRegionOfDefinition(args.time);
+        return true;
+    }
+    return false;
 }
 
 void OpenDefocusPlugin::updateParamVisibility() {
