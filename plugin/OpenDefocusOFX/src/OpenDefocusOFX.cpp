@@ -34,7 +34,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v2-dev (Phase C: Abort Callback)";
+static const char* kDevVersion = "v0.1.10-OFX-v2-dev (Phase D: Stripe Perf Optimize)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -819,22 +819,10 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     fetchWindow.y1 -= margin;
     fetchWindow.y2 += margin;
 
-    // Cap buffer width to prevent the upstream ChunkHandler (limit=4096)
-    // from splitting horizontally.  The ChunkHandler processes chunks
-    // in-place, so chunk N+1 reads chunk N's blurred output in the overlap
-    // zone, causing visible vertical seams at the chunk boundary.
-    // OFX hosts may provide renderWindow with overscan (e.g. -12..4108 for
-    // 4K-DCP), pushing bufWidth past 4096.  Trim the overscan symmetrically;
-    // the ClampToEdge copy loop already handles edge pixels.
+    // Buffer width uses full fetchWindow.  Stripe-based rendering keeps
+    // each stripe's buffer well under the wgpu 128 MB storage-buffer
+    // limit, so full-width buffers (5K, 8K+) are safe.
     int bufWidth  = fetchWindow.x2 - fetchWindow.x1;
-    if (bufWidth > 4096) {
-        int excess = bufWidth - 4096;
-        int trimLeft = excess / 2;
-        int trimRight = excess - trimLeft;
-        fetchWindow.x1 += trimLeft;
-        fetchWindow.x2 -= trimRight;
-        bufWidth = 4096;
-    }
 
     int bufHeight = fetchWindow.y2 - fetchWindow.y1;
 
@@ -968,8 +956,6 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
                   static_cast<float>(centerWorldY - fetchWindow.y1));
 
     // renderRegion in buffer-local coordinates, clamped to buffer bounds.
-    // fetchWindow X may have been trimmed to cap bufWidth ≤ 4096, so rw
-    // can extend beyond fetchWindow — clamp to [0, bufWidth/bufHeight].
     int32_t fullRegion[4] = {
         0, 0,
         static_cast<int32_t>(bufWidth),

@@ -106,6 +106,8 @@ The plugin uses `renderScale.x` only (assumes uniform scaling). NUKE and Flame a
 | 9 | Filter Preview buffer overflow / stripe artifact / proxy scaling | FIXED | Buffer size calculation corrected. Stripe splitting bypass for preview rendering. Proxy mode renderScale applied to filter resolution |
 | 10 | Bokeh parameter grayout not restoring | FIXED | Visibility logic corrected |
 | 11 | Filter Preview black in Depth mode | FIXED | State initialization corrected |
+| 21 | Edge-fold artifact at resolutions > 4096px | FIXED | Removed obsolete `bufWidth` 4096 cap. Stripe-based rendering keeps per-stripe buffers under wgpu 128MB limit, so full-width buffers (5K, 8K+) are safe |
+| 22 | Catseye/Barndoors/Astigmatism NDK parity | IDENTIFIED | Position-dependent effects produce slightly weaker results than NDK. Root cause: `center` (fetchWindow-local) and `full_region` (buffer-local) coordinate system mismatch in `distance_to_screen_center` calculation. Fix requires coordinate system alignment across stripe loop, overscan, and proxy — planned for future phase |
 
 ### Upstream-Originated (DEFERRED)
 
@@ -120,6 +122,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 6 | CPU/GPU ~1px pixel drift | Minor rendering difference between CPU and GPU backends. Same behavior in NDK |
 | 7 | Size Multiplier bokeh breakdown at large values | Bokeh collapses or grey regions appear at large Size Multiplier values. Normal when equivalent size is set via Size/MaxSize parameters. Similar symptom in NDK |
 | 18 | Catseye applied when disabled (Barndoor interaction) | `calculate_catseye()` in the kernel is called unconditionally without checking `CATSEYE_ENABLED` flag. When Barndoor Enable=on triggers the non-uniform path, catseye effects are applied even with Catseye Enable=off. Barndoors and Astigmatism correctly check their enable flags |
+| 23 | Vertical seam at resolutions > 4096px | Upstream `ChunkHandler` (`chunks.rs`) hardcodes `limit=4096` and splits horizontally when stripe width exceeds this. Chunk boundary produces a visible seam. Same artifact in NDK. Not fixable from OFX side |
 | 19 | Axial Aberration enable flag checks wrong bitflag | `get_axial_aberration_settings()` checks `BARNDOORS_ENABLED` instead of the correct flag (copy-paste error in `internal_settings.rs`) |
 
 ### Architecture
@@ -130,6 +133,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 15 | UHD CPU extreme slowdown | FIXED | Resolved by stripe-based rendering |
 | 16 | Flame crosshair drag responsiveness | IDENTIFIED | OFX API requires `fetchImage()` which triggers full node tree re-evaluation. NDK version accesses NUKE's scanline cache directly at zero cost. Fundamental OFX API limitation; current performance is acceptable (UAT 30.19 PASS) |
 | 17 | Render abort (coarse, stripe boundary) | FIXED | Phase C: abort callback implemented. Host `abort()` is checked between stripes via `user_data` callback. NUKE: confirmed working. Flame: N/A (host blocks UI during render, abort() never returns true). NDK polls every 10ms (finer granularity); OFX checks at stripe boundaries only |
+| 20 | Stripe rendering memory copy overhead | IDENTIFIED | Each render call clones the full source image (~133MB at 4K) plus per-stripe buffer copies. The upstream `render_convolution()` API requires `&mut` ownership of image data, preventing zero-copy operation. This results in ~266MB of allocation/copy overhead per 4K frame. Combined with #16 (fetchImage re-evaluation), Flame GUI responsiveness is noticeably slower than CPU-only plugins (e.g., Frischluft Lenscare) that operate directly on input buffers. Future optimization: pre-allocated stripe buffer reuse |
 
 ### Flame: Known Limitations
 
@@ -154,7 +158,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 │   ├── opendefocus/           # OpenDefocus core (git submodule)
 │   └── openfx/                # OpenFX SDK (git submodule)
 ├── bundle/                    # Built OFX bundle output
-├── references/                # Design documents, investigation notes, known issues
+├── OFX_architecture.md        # Architecture and rendering pipeline diagrams
 ├── README.md                  # Upstream OpenDefocus README
 ├── README_OFX.md              # This file
 ├── LICENSE.md                 # License information

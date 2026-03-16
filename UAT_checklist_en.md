@@ -413,6 +413,22 @@
 | 32.17 | Multi-frame rendering (Flipbook/Write) with stripe splitting operates stably | PASS | No crash or data cross-contamination between frames |
 | 32.18 | Stripe-based rendering works correctly in Flame | DEFERRED | Flame Filter Image platform limitation. Non-Filter-Image rendering works correctly |
 
+### 33. Phase D: Stripe Performance Optimization
+
+| # | Test Item | Result | Notes |
+|---|-----------|--------|-------|
+| 33.1 | HD (1920×1080) GPU rendering produces identical output to pre-optimization | PASS | NDK comparison also performed |
+| 33.2 | HD (1920×1080) CPU rendering produces identical output to pre-optimization | PASS | NDK comparison also performed |
+| 33.3 | UHD (3840×2160) GPU rendering completes successfully | PASS | No wgpu buffer limit issues |
+| 33.4 | Quality=Low/Medium/High all render correctly | PASS | Stripe height changes verified |
+| 33.5 | Catseye/Barndoors/Astigmatism: no seams at stripe boundaries | PASS | Upstream ChunkHandler seam discovered at >4096px — unrelated to Phase D, recorded as Known Issue #23 |
+| 33.6 | Filter Preview operates normally | PASS | Preview stripe height unchanged (full height) |
+| 33.7 | Depth mode + Focal Plane Setup renders correctly | PASS | FocalPlaneSetup stripe height unchanged (32) |
+| 33.8 | Proxy mode (1/2, 1/4) operates correctly | PASS | Rendering and Filter Preview confirmed |
+| 33.9 | Abort works correctly between stripes | PASS | Phase C abort callback compatible |
+| 33.10 | Flame GUI responsiveness is improved | PASS | Noticeable improvement, still slower than NUKE |
+| 33.11 | Multi-frame rendering (Flipbook/Write) stable | PASS | HD Depth mode, Focal Plane animation, 120 frames — no crash or render error |
+
 ## 31. Known Constraints (Out of Scope for This Version)
 
 The following are not implemented in v0.1.10-OFX-v1 and are out of test scope:

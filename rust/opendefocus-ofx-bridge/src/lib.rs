@@ -1169,6 +1169,12 @@ pub unsafe extern "C" fn od_render(
         }
     };
 
+    // Pre-allocate stripe buffer to avoid per-stripe heap allocation.
+    // Max input height = stripe_h + padding*2 (clamped to image bounds).
+    let max_stripe_h_in = (stripe_h + padding * 2).min(fr[3] - fr[1]) as usize;
+    let max_stripe_pixels = max_stripe_h_in * img_w * img_ch;
+    let mut stripe_buf = vec![0.0f32; max_stripe_pixels];
+
     let mut is_first_gpu_stripe = is_gpu;
     let mut y_out = rr[1]; // render_region.y
 
@@ -1193,12 +1199,12 @@ pub unsafe extern "C" fn od_render(
         let y_in_end = (y_out_end + padding).min(fr[3]);
         let stripe_h_in = (y_in_end - y_in) as usize;
 
-        // Build a temporary mutable buffer from the original source data.
+        // Copy fresh source pixels into the pre-allocated stripe buffer.
         // This ensures each stripe always sees un-rendered source pixels,
         // even in padding areas that overlap with previously rendered stripes.
         let img_offset = (y_in as usize) * img_w * img_ch;
         let img_count = stripe_h_in * img_w * img_ch;
-        let mut stripe_buf = source_image[img_offset..img_offset + img_count].to_vec();
+        stripe_buf[..img_count].copy_from_slice(&source_image[img_offset..img_offset + img_count]);
 
         // Build stripe RenderSpecs with global coordinates.
         // full_region.y must encode the stripe's absolute Y offset so that
@@ -1221,7 +1227,7 @@ pub unsafe extern "C" fn od_render(
 
         let stripe_image = match ArrayViewMut3::from_shape(
             (stripe_h_in, img_w, img_ch),
-            &mut stripe_buf,
+            &mut stripe_buf[..img_count],
         ) {
             Ok(v) => v,
             Err(e) => {
@@ -1309,11 +1315,11 @@ pub unsafe extern "C" fn od_render(
                     }
                 }
 
-                // Retry this stripe with CPU (rebuild from source — originals consumed)
-                let mut retry_buf = source_image[img_offset..img_offset + img_count].to_vec();
+                // Retry this stripe with CPU (re-copy source — originals consumed by GPU attempt)
+                stripe_buf[..img_count].copy_from_slice(&source_image[img_offset..img_offset + img_count]);
                 let retry_image = match ArrayViewMut3::from_shape(
                     (stripe_h_in, img_w, img_ch),
-                    &mut retry_buf,
+                    &mut stripe_buf[..img_count],
                 ) {
                     Ok(v) => v,
                     Err(e) => {
@@ -1342,7 +1348,7 @@ pub unsafe extern "C" fn od_render(
                 )) {
                     Ok(()) => {
                         log::info!("CPU fallback stripe render succeeded");
-                        copy_render_region(&retry_buf);
+                        copy_render_region(&stripe_buf);
                     }
                     Err(e) => {
                         log::error!("CPU fallback stripe render also failed: {e}");
@@ -1392,11 +1398,11 @@ fn get_stripe_height(settings: &datamodel::Settings, is_gpu: bool, image_height:
         return 32;
     }
     if !is_gpu {
-        return 64;
+        return 256; // CPU has no buffer limit; fewer stripes = less copy overhead
     }
     match settings.render.get_quality() {
         datamodel::render::Quality::Low => 256,
-        datamodel::render::Quality::Medium => 128,
-        _ => 64, // High, Custom
+        datamodel::render::Quality::Medium => 256,  // 128 → 256
+        _ => 128, // High, Custom: 64 → 128 (safe within wgpu 128MB limit)
     }
 }

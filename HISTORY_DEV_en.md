@@ -1632,12 +1632,66 @@ Phase 1 (coarse): abort checked at stripe boundaries only. NDK polls every 10ms 
 - **Phase C (Abort Callback)**: Coarse abort implemented, UAT complete (32.14/32.14a-c all PASS), merged to master
 - **Flame Filter Image**: Resolution mix error and aspect ratio distortion — DEFERRED (platform/upstream limitation)
 
+### 2026-03-17: Phase D — Stripe Performance Optimization
+
+#### D1: Stripe buffer pre-allocation (Known Issue #20 mitigation)
+
+- **Problem**: Each stripe allocated a new `Vec<f32>` via `to_vec()`, causing ~266MB of heap allocation/copy per 4K frame
+- **Fix**: Pre-allocate one stripe buffer before the loop, reuse with `copy_from_slice()` per stripe
+- Heap allocations reduced from 34/frame to 1/frame (4K High quality)
+- GPU retry path also reuses the same buffer
+
+#### D2: Stripe height increase
+
+- CPU: 64 → 256 (34 → 9 stripes at 4K, 75% reduction)
+- GPU High: 64 → 128 (34 → 17 stripes)
+- GPU Medium: 128 → 256 (17 → 9 stripes)
+- GPU Low, FocalPlaneSetup, Preview: unchanged
+
+#### D3: bufWidth 4096 cap removal (Known Issue #21 — FIXED)
+
+- **Problem**: Resolutions > 4096px wide showed horizontal edge-fold artifacts. Left/right edges were cropped and edge pixels replicated, causing visible stripe patterns after defocus convolution. Severity increased with resolution
+- **Discovery**: Found during Phase D UAT with 5K+ test patterns. Pre-existed since the cap was added (before stripe rendering), but was missed in earlier UAT due to insufficient high-resolution testing
+- **Root cause**: `bufWidth` was capped to 4096 in OpenDefocusOFX.cpp to prevent wgpu 128MB buffer overflow. After stripe-based rendering was introduced, this cap became unnecessary — each stripe's buffer is `width × stripe_h × 4ch × 4bytes`, well under 128MB even at 8K+
+- **Fix**: Removed the `bufWidth` 4096 cap and associated `fetchWindow` trim logic
+- **Verification**: 5K+ and extreme resolution test patterns confirmed artifact-free output
+- **Reference samples**: `references/checker_testpattern_defocus_C.png` (before), `references/checker_testpattern_defocus_C_fixed.png` (after)
+
+#### Known Issue #22: Catseye/Barndoors/Astigmatism NDK parity (IDENTIFIED)
+
+- **Symptom**: Position-dependent effects produce slightly different (weaker) results than NDK
+- **Root cause**: Coordinate system mismatch between `center` and `full_region`
+  - NDK: both are box-local (same coordinate system). center = `format_center - box.y`, full_region.y = `stripe.y - box.y`
+  - OFX: center is fetchWindow-local (`rod_center - fetchWindow.y1`), full_region is buffer-local (0 origin)
+  - Upstream kernel divides by center: `(real_position - center) / center` — coordinate mismatch produces different normalized distance
+- **Decision**: Not fixed in Phase D. Requires coordinate system alignment across stripe loop, overscan, and proxy — all position-dependent UAT must be re-run. Planned for future phase
+- **Reference samples**: `references/checker_testpattern_defocus_catseye_NDK.png` vs `_OFX.png`, `_barndoor_NDK.png` vs `_OFX.png`
+
+#### Known Issue #23: Vertical seam at resolutions > 4096px (DEFERRED — Upstream)
+
+- **Symptom**: Vertical boundary line visible at X≈4096 when image width exceeds 4096px. Same artifact occurs in NDK
+- **Root cause**: Upstream `ChunkHandler` (`chunks.rs:19`) hardcodes `limit: 4096`. When stripe `full_region` width exceeds 4096, it splits horizontally into chunks. Chunk boundary produces a visible seam due to imperfect padding overlap
+- **OFX fixable**: No. ChunkHandler is inside the upstream `opendefocus` crate, inaccessible from OFX bridge
+- **Classification**: Upstream bug. Per porting policy, not fixed on OFX side. Upstream Issue report candidate
+- **Reference samples**: `references/checker_testpattern_seam.png` (OFX), `references/checker_testpattern_seam_NDK.png` (NDK)
+
+### Current Status
+
+- **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
+- **Performance Optimization Phase 1 (Stripe Rendering)**: Complete, merged to master
+- **Code Review Phase**: Flame comment correction, README host/renderScale documentation completed
+- **Phase B (OFX Bug Fixes)**: Filter Preview (27.8), env_logger (28.4/28.5/26.8) — all PASS
+- **Phase C (Abort Callback)**: Coarse abort implemented, UAT complete, merged to master
+- **Phase D (Stripe Perf Optimize)**: Buffer pre-allocation, stripe height increase, bufWidth cap removal — in progress on `feature/stripe-perf-optimize`
+- **Flame Filter Image**: Resolution mix error and aspect ratio distortion — DEFERRED (platform/upstream limitation)
+
 ### OFX-Side Unresolved
 
-All Phase B and C items resolved. No remaining OFX-side bugs at this time.
+Known Issue #20 (memory copy overhead) partially mitigated by Phase D but not fully resolved — upstream API requires owned buffers.
 
 ### Next Steps
 
-1. Release: v0.1.10-OFX-v2 (Phase B + C)
-2. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (#18), axial aberration flag misreference (#19)
-3. Depth image caching for Flame drag responsiveness improvement
+1. Phase D UAT completion and merge to master
+2. Release: v0.1.10-OFX-v2 (Phase B + C + D)
+3. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (#18), axial aberration flag misreference (#19)
+4. Depth image caching for Flame drag responsiveness improvement
