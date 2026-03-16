@@ -1677,21 +1677,40 @@ Phase 1 (coarse): abort checked at stripe boundaries only. NDK polls every 10ms 
 
 ### Current Status
 
-- **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
+- **Phase 1–11 (OFX Port)**: Complete, UAT complete
 - **Performance Optimization Phase 1 (Stripe Rendering)**: Complete, merged to master
-- **Code Review Phase**: Flame comment correction, README host/renderScale documentation completed
-- **Phase B (OFX Bug Fixes)**: Filter Preview (27.8), env_logger (28.4/28.5/26.8) — all PASS
-- **Phase C (Abort Callback)**: Coarse abort implemented, UAT complete, merged to master
-- **Phase D (Stripe Perf Optimize)**: Buffer pre-allocation, stripe height increase, bufWidth cap removal — in progress on `feature/stripe-perf-optimize`
-- **Flame Filter Image**: Resolution mix error and aspect ratio distortion — DEFERRED (platform/upstream limitation)
+- **Code Review Phase**: Complete — Flame comment correction, README host/renderScale documentation, Filter Preview state leak fix
+- **Phase B (OFX Bug Fixes)**: Complete — Filter Preview (27.8), env_logger (28.4/28.5/26.8) — all PASS
+- **Phase C (Abort Callback)**: Complete — Coarse abort implemented, UAT complete (32.14/32.14a-c all PASS), merged to master
+- **Phase D (Stripe Perf Optimize)**: Complete — Buffer pre-allocation, stripe height increase, bufWidth cap removal. UAT complete (33.1-33.11 all PASS), merged to master
+- **v0.1.10-OFX-v2**: Released (2026-03-17)
+- **Flame Filter Image**: DEFERRED (platform/upstream limitation)
 
 ### OFX-Side Unresolved
 
-Known Issue #20 (memory copy overhead) partially mitigated by Phase D but not fully resolved — upstream API requires owned buffers.
+| # | Issue | Status | Notes |
+|---|-------|--------|-------|
+| 20 | Memory copy overhead | PARTIALLY MITIGATED | Per-stripe alloc eliminated; full source clone remains (upstream API) |
+| 22 | Catseye/Barndoors/Astigmatism NDK parity | IDENTIFIED | center/full_region coordinate system mismatch |
+
+### Upstream Issues (to report)
+
+| # | Issue | Upstream Impact |
+|---|-------|----------------|
+| 1 | Gamma Correction not connected | Protobuf only, no pipeline |
+| 2 | Focal Plane Offset not connected | NDK knob exists, ConvolveSettings unwired |
+| 3 | Bokeh Noise feature flag disabled | apply_noise() stubbed out |
+| 4 | Axial Aberration enum off-by-one | Protobuf 0,1,2 vs Rust 1,2,3 |
+| 5 | NDK/OFX ~1px pixel drift | Coordinate system difference |
+| 6 | CPU/GPU ~1px pixel drift | Backend difference |
+| 18 | Catseye enable check missing | calculate_catseye() unconditional |
+| 19 | Axial Aberration flag misreference | Checks BARNDOORS_ENABLED |
+| 23 | ChunkHandler vertical seam >4096px | Hardcoded limit=4096 |
 
 ### Next Steps
 
-1. Phase D UAT completion and merge to master
-2. Release: v0.1.10-OFX-v2 (Phase B + C + D)
-3. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (#18), axial aberration flag misreference (#19)
-4. Depth image caching for Flame drag responsiveness improvement
+1. **Known Issue #22 fix** (HIGH): Catseye/Barndoors/Astigmatism NDK parity — coordinate system alignment for center/full_region. Requires dedicated branch + full position-dependent UAT
+2. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23 to codeberg.org/gillesvink/opendefocus
+3. **Open test feedback**: Monitor and respond to v0.1.10-OFX-v2 tester reports
+4. **Depth image caching**: Flame drag responsiveness improvement (Known Issue #16 mitigation)
+5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation (NDK parity). Requires NUKE/Flame abort() thread safety verification
