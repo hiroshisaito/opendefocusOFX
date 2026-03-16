@@ -129,7 +129,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 14 | UHD GPU failure (wgpu 128MB limit) | FIXED | Resolved by stripe-based rendering |
 | 15 | UHD CPU extreme slowdown | FIXED | Resolved by stripe-based rendering |
 | 16 | Flame crosshair drag responsiveness | IDENTIFIED | OFX API requires `fetchImage()` which triggers full node tree re-evaluation. NDK version accesses NUKE's scanline cache directly at zero cost. Fundamental OFX API limitation; current performance is acceptable (UAT 30.19 PASS) |
-| 17 | Render abort not implemented | IDENTIFIED | OFX version does not call the host `abort()` API during rendering. User cancellation during rendering is not reflected. NDK version polls `node.aborted()` every 10ms via a background task. Phase 2 implementation planned using callback-based abort propagation |
+| 17 | Render abort (coarse, stripe boundary) | FIXED | Phase C: abort callback implemented. Host `abort()` is checked between stripes via `user_data` callback. NUKE: confirmed working. Flame: N/A (host blocks UI during render, abort() never returns true). NDK polls every 10ms (finer granularity); OFX checks at stripe boundaries only |
 
 ### Flame: Known Limitations
 

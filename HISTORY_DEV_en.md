@@ -1593,21 +1593,51 @@ Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
 - Terminal log showed `^CApplication exited abnormally` — Ctrl+C misoperation confirmed
 - Retest with proper procedure: no crash. Not a plugin issue
 
+### 2026-03-16: Phase C — Abort Callback Implementation
+
+Implemented coarse abort (stripe boundary) using `user_data` callback pattern.
+
+#### Design (based on 8 rounds of code review)
+
+- `od_render()` signature extended with `abort_check_fn` + `abort_user_data`
+- `OdResult::Aborted = 5` added to FFI enum
+- C++ `abortCheckThunk()` bridges OFX `abort()` API via static thunk + `this` as user_data
+- On abort: `copySourceToBuffer()` helper re-populates imageBuffer with pristine source (overscan-safe, clamp-to-edge)
+- Preview render passes `nullptr` (no abort needed)
+
+#### Key files
+
+- `rust/opendefocus-ofx-bridge/src/lib.rs`: OdResult::Aborted, od_render signature, stripe loop abort check
+- `plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`: abortCheckThunk, copySourceToBuffer helper, abort fallback
+
+#### UAT Results (32.14, 32.14a-c)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 32.14 | Abort reflected between stripes | PASS | NUKE: confirmed. Flame: N/A (host blocks UI during render) |
+| 32.14a | Output after abort is pristine source | PASS | NUKE confirmed |
+| 32.14b | No crash/hang after abort | PASS | NUKE confirmed |
+| 32.14c | Filter Preview normal operation | PASS | nullptr callback works correctly |
+
+#### Granularity note
+
+Phase 1 (coarse): abort checked at stripe boundaries only. NDK polls every 10ms via async task (finer granularity). Flame does not benefit from abort due to UI blocking during render.
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
-- **Performance Optimization Phase 1 (Stripe Rendering)**: Implementation complete, UAT complete, merged to master
-- **Code Review Phase**: Flame comment correction, README host/renderScale documentation, abort Known Issue #17 added. Abort implementation deferred to Phase 2
-- **Phase B (OFX Bug Fixes)**: Filter Preview stripe artifact and proxy scaling fixed (27.8 PASS). env_logger default filter set to info (28.4/28.5 PASS, 26.8 PASS)
-- **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Filter aspect ratio distortion is upstream-caused (DEFERRED). Total judgment: not usable in Flame
+- **Performance Optimization Phase 1 (Stripe Rendering)**: Complete, merged to master
+- **Code Review Phase**: Flame comment correction, README host/renderScale documentation completed
+- **Phase B (OFX Bug Fixes)**: Filter Preview (27.8), env_logger (28.4/28.5/26.8) — all PASS
+- **Phase C (Abort Callback)**: Coarse abort implemented, UAT complete (32.14/32.14a-c all PASS), merged to master
+- **Flame Filter Image**: Resolution mix error and aspect ratio distortion — DEFERRED (platform/upstream limitation)
 
 ### OFX-Side Unresolved
 
-All Phase B items resolved. No remaining OFX-side bugs at this time.
+All Phase B and C items resolved. No remaining OFX-side bugs at this time.
 
 ### Next Steps
 
-1. Open test release: v0.1.10-OFX-v1 (released)
-2. Phase 2: Abort callback implementation (Known Issue #17)
-3. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (Known Issue #18), axial aberration flag misreference (Known Issue #19)
-4. Phase 2: Depth image caching for Flame drag responsiveness improvement
+1. Release: v0.1.10-OFX-v2 (Phase B + C)
+2. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (#18), axial aberration flag misreference (#19)
+3. Depth image caching for Flame drag responsiveness improvement
