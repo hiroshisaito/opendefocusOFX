@@ -64,7 +64,7 @@ flowchart TD
   P["Read OFX params<br/>apply renderScale<br/>od_set_use_gpu() + od_set_*"]
   Prev{"Filter preview path?"}
   PrevBuf["Build previewBuf<br/>force 2D + preview resolution"]
-  Build["Compute fetchWindow<br/>expand Y by blur margin<br/>cap width <= 4096"]
+  Build["Compute fetchWindow<br/>expand Y by blur margin<br/>use full buffer width"]
   Src["Copy source into imageBuffer<br/>ClampToEdge padding"]
   Dep{"Depth mode and depth clip?"}
   DepBuf["Copy depth into depthBuffer<br/>ClampToEdge padding"]
@@ -77,10 +77,11 @@ flowchart TD
     R0["Validate pointers and regions<br/>build filter template<br/>clear abort flag"]
     R1{"gpu_failed while renderer is still GPU?"}
     R1A["Recreate CPU renderer before rendering"]
-    R2["Choose stripe_h<br/>32 focal setup, 64 CPU, 128/256 GPU by quality<br/>padding = defocus padding + 4"]
-    R3["Clone source_image snapshot"]
+    R2["Choose stripe_h<br/>preview = full height, focal setup = 32<br/>CPU = 256, GPU = 128/256 by quality<br/>padding = defocus padding + 4"]
+    R3["Clone source_image snapshot<br/>pre-allocate reusable stripe_buf"]
     R4{"More stripes in render_region?"}
-    R5["Build stripe_buf and stripe_depth<br/>compute y_in/y_out and stripe_specs"]
+    R4A{"Abort requested?<br/>global flag or host callback"}
+    R5["Reuse stripe_buf and stripe_depth<br/>compute y_in/y_out and stripe_specs"]
     R6{"First GPU stripe?"}
     R7["render_stripe() inside catch_unwind"]
     R8{"GPU stripe succeeded?"}
@@ -106,6 +107,7 @@ flowchart TD
     C12["Blend back into chunk image<br/>output + original * (1 - alpha)"]
   end
 
+  AbortFix["If od_render() returns ABORTED<br/>repopulate imageBuffer from pristine source"]
   Post["C++ post-process after od_render returns<br/>previewBuf: clear dst + center-copy<br/>imageBuffer: copy intersection + overscan edge replicate"]
   Ok["render() returns to host"]
 
@@ -126,7 +128,9 @@ flowchart TD
   R1 -- "yes" --> R1A --> R2
   R1 -- "no" --> R2
   R2 --> R3 --> R4
-  R4 -- "yes" --> R5 --> R6
+  R4 -- "yes" --> R4A
+  R4A -- "yes" --> AbortFix
+  R4A -- "no" --> R5 --> R6
   R6 -- "yes" --> R7 --> R8
   R8 -- "yes" --> C1
   R8 -- "no" --> R9 --> C1
@@ -142,6 +146,7 @@ flowchart TD
 
   R11 --> R4
   R4 -- "no" --> Post
+  AbortFix --> Post
 
   Post --> Ok
 ```
@@ -156,3 +161,11 @@ Relevant files:
 - `upstream/opendefocus/crates/opendefocus/src/runners/runner.rs`
 - `upstream/opendefocus/crates/opendefocus/src/runners/cpu.rs`
 - `upstream/opendefocus/crates/opendefocus/src/runners/wgpu.rs`
+
+## 3. Current Behavior Notes
+
+- C++ no longer caps `bufWidth` to `4096`. The full `fetchWindow` width is used, and stripe splitting keeps each stripe buffer under the wgpu storage-buffer limit.
+- Rust still uses the upstream `ChunkHandler(limit = 4096)` inside `RenderEngine`, so images wider than `4096px` can still hit the upstream horizontal chunk path and its known seam issue.
+- Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback. If abort is detected, Rust returns `ABORTED`, C++ restores pristine source pixels into `imageBuffer`, and the normal overscan-safe dst copy path writes an unprocessed frame.
+- Filter Preview is only enabled for `Disc` and `Blade`. In Rust, preview renders use full-height stripe size to bypass stripe splitting and avoid preview seams.
+- Phase D reduced stripe overhead by reusing a pre-allocated `stripe_buf`, but each render still clones the full source image once because the upstream render API requires mutable ownership of the working image buffer.
