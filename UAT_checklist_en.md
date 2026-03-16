@@ -311,7 +311,7 @@
 | 26.5 | Automatic CPU fallback on GPU rendering failure | PASS | Log should show "GPU render failed" → "recreating renderer as CPU-only". Confirmed in NUKE console |
 | 26.6 | Continuous rendering works normally after CPU fallback | PASS | Stable operation with parameter changes and frame scrubbing |
 | 26.7 | Output image is normal after CPU fallback | PASS | No black output or artifacts |
-| 26.8 | od_is_gpu_active returns false after fallback | ??? | Status display should be correct. Unable to determine where to check status |
+| 26.8 | od_is_gpu_active returns false after fallback | PASS | B2 fix: env_logger default filter set to info. "Renderer recreated: CPU/GPU" log output confirmed |
 | 26.9 | GPU continues to be used at resolutions where GPU succeeds (HD/2K) | PASS | No unnecessary CPU fallback |
 
 ## 27. Render Scale Correction + RoI Extension (Phase 10)
@@ -325,7 +325,7 @@
 | 27.5 | Image edges render correctly in Depth mode + large Max Size | PASS | RoI extended by max(size, maxSize) |
 | 27.6 | Image edges render correctly with large Size Multiplier | FAIL | Bokeh breaks down or partial gray areas appear. Original NDK version has similar symptoms (not exactly the same). No symptoms when doubling bokeh via Size/MaxSize |
 | 27.7 | Filter Type = Image + RoI extension renders correctly | PASS | Combined with Filter clip |
-| 27.8 | Filter Preview displays correctly in proxy mode | FAIL | Regardless of proxy mode, Filter Preview overflows beyond filter size to fill the screen. This appears to be a Filter issue rather than a Render Scale test |
+| 27.8 | Filter Preview displays correctly in proxy mode | PASS | Fixed: bypass stripe splitting for preview (get_stripe_height returns image_height). Proxy mode scaling fixed (fRes scaled by renderScale). Retest passed |
 | 27.9 | Flame renders correctly when switching proxy mode | | Same behavior as NUKE |
 | 27.10 | No crash and correct rendering when panning viewer | PASS | Handles srcBounds and renderWindow offset |
 | 27.11 | No crash when zooming in (partial display) viewer | PASS | When renderWindow covers only part of image |
@@ -344,8 +344,8 @@
 | 28.1 | Use GPU parameter is displayed on Controls tab | PASS | Default: true (checkbox) |
 | 28.2 | Rendering completes normally with Use GPU = true (GPU) | PASS | HD/2K resolution |
 | 28.3 | Rendering completes normally with Use GPU = false (CPU) | PASS | HD/2K resolution |
-| 28.4 | Renderer is recreated as CPU when switching Use GPU true → false | FAIL | Log should show "Renderer recreated: CPU". CPU rendering appears to work but no log output (NUKE/Flame) |
-| 28.5 | Renderer is recreated as GPU when switching Use GPU false → true | FAIL | Log should show "Renderer recreated: GPU". GPU rendering appears to work but no log output (NUKE/Flame) |
+| 28.4 | Renderer is recreated as CPU when switching Use GPU true → false | PASS | Fix: env_logger default filter set to info. Log output confirmed. Flame GPU/CPU switch stable (initial crash report was Ctrl+C misoperation) |
+| 28.5 | Renderer is recreated as GPU when switching Use GPU false → true | PASS | Fix: env_logger default filter set to info. Log output confirmed. Retest passed |
 | 28.6 | CPU mode and GPU mode output results match | FAIL | ~1px pixel drift observed — similar behavior to original NDK version (NUKE/Flame) |
 | 28.7 | 4K rendering completes normally in CPU mode | PASS | No GPU memory limitation impact |
 | 28.8 | GPU recovers when setting Use GPU = true after auto fallback | PASS | gpu_failed flag is reset |

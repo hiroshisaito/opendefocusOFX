@@ -90,8 +90,12 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
         return OdResult::ErrorNullPointer;
     }
 
-    // Initialize logging (once, ignore errors on subsequent calls)
-    let _ = env_logger::try_init();
+    // Initialize logging (once, ignore errors on subsequent calls).
+    // Default to "info" level so OFX hosts see log output without
+    // requiring RUST_LOG to be set in the process environment.
+    let _ = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info")
+    ).try_init();
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_time()
@@ -1130,7 +1134,7 @@ pub unsafe extern "C" fn od_render(
     // render_region back to the output image_data.
 
     let is_gpu = inst.renderer.is_gpu() && !inst.gpu_failed;
-    let stripe_h = get_stripe_height(&inst.settings, is_gpu) as i32;
+    let stripe_h = get_stripe_height(&inst.settings, is_gpu, image_height) as i32;
     // Add extra padding beyond the convolution radius to prevent edge-clamp
     // artifacts at stripe boundaries.  The upstream kernel's bilinear sampling
     // (bilinear_depth_based) accesses base_coords + 1, and skip_overlap
@@ -1365,7 +1369,14 @@ pub unsafe extern "C" fn od_render(
 
 /// Determine stripe height based on quality and GPU mode.
 /// Mirrors NDK `stripe_height()` (opendefocus-nuke/src/lib.rs:458-473).
-fn get_stripe_height(settings: &datamodel::Settings, is_gpu: bool) -> u32 {
+fn get_stripe_height(settings: &datamodel::Settings, is_gpu: bool, image_height: u32) -> u32 {
+    // Filter preview renders bokeh shape directly into the buffer via
+    // bokeh_creator::Renderer::render_to_array().  This is NOT a convolution,
+    // so stripe splitting would produce visible seams at stripe boundaries.
+    // Preview buffers are small (max 1024×1024), so no memory concern.
+    if settings.render.filter.preview {
+        return image_height;
+    }
     if settings.render.result_mode() == datamodel::render::ResultMode::FocalPlaneSetup {
         return 32;
     }

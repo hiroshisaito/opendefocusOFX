@@ -103,7 +103,7 @@ The plugin uses `renderScale.x` only (assumes uniform scaling). NUKE and Flame a
 |---|-------|--------|--------|
 | 5 | NDK/OFX ~1px pixel drift | DEFERRED | OFX standard coordinate system compliance; imperceptible at 2K+ |
 | 8 | Stripe boundary seam | FIXED | Fixed with source_image snapshot + global coordinates in stripe RenderSpecs |
-| 9 | Filter Preview buffer overflow | FIXED | Buffer size calculation corrected |
+| 9 | Filter Preview buffer overflow / stripe artifact / proxy scaling | FIXED | Buffer size calculation corrected. Stripe splitting bypass for preview rendering. Proxy mode renderScale applied to filter resolution |
 | 10 | Bokeh parameter grayout not restoring | FIXED | Visibility logic corrected |
 | 11 | Filter Preview black in Depth mode | FIXED | State initialization corrected |
 

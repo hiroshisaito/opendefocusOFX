@@ -1566,25 +1566,48 @@ Tester: Hiroshi. See `UAT_checklist_ja.md` section 32 for details.
 - **DEFERRED items (32.10, 32.18)** are both caused by the known Flame Filter Image platform limitation, not stripe-specific issues
 - **32.14 reclassified as DEFERRED** — OFX abort() is unimplemented (Known Issue #17). Phase 2 planned with callback-based abort propagation
 
+### 2026-03-16: Phase B — OFX Bug Fixes
+
+#### B1: Filter Preview stripe artifact and proxy scaling (27.8)
+
+- **Symptom 1**: Filter Resolution 256+ produced step artifacts at stripe boundaries
+- **Root cause**: Preview rendering went through stripe loop. `render_preview_bokeh()` renders bokeh to the full array view, but each stripe only sees its portion, producing truncated shapes
+- **Fix**: `get_stripe_height()` returns `image_height` when `filter.preview == true`, bypassing stripe splitting. Preview buffers are small (max 1024×1024), no memory concern
+- **Symptom 2**: Proxy mode (1:2) doubled preview size
+- **Root cause**: `fRes = filterResolution` was not scaled by `renderScale`
+- **Fix**: `fRes = filterResolution * renderScale`
+- **UAT 27.8**: PASS
+
+#### B2: env_logger default filter (28.4, 28.5, 26.8)
+
+- **Symptom**: `log::info!` messages not reaching host console (NUKE/Flame)
+- **Root cause**: `env_logger::try_init()` defaults to showing nothing unless `RUST_LOG` env var is set. OFX hosts do not set this
+- **Fix**: `env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init()`
+- **UAT 28.4/28.5**: PASS — "Renderer recreated: CPU/GPU" confirmed in stderr
+- **UAT 26.8**: PASS — GPU status visible via log output
+
+#### Flame GPU/CPU switch crash report
+
+- Flame crash during GPU/CPU mode switching test
+- Investigation: crash dump showed all OpenDefocusOFX threads in normal wait state (tokio park). No SIGSEGV/SIGABRT
+- Terminal log showed `^CApplication exited abnormally` — Ctrl+C misoperation confirmed
+- Retest with proper procedure: no crash. Not a plugin issue
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
 - **Performance Optimization Phase 1 (Stripe Rendering)**: Implementation complete, UAT complete, merged to master
 - **Code Review Phase**: Flame comment correction, README host/renderScale documentation, abort Known Issue #17 added. Abort implementation deferred to Phase 2
+- **Phase B (OFX Bug Fixes)**: Filter Preview stripe artifact and proxy scaling fixed (27.8 PASS). env_logger default filter set to info (28.4/28.5 PASS, 26.8 PASS)
 - **Flame Filter Image**: Resolution mix error confirmed as Flame platform limitation (DEFERRED). Filter aspect ratio distortion is upstream-caused (DEFERRED). Total judgment: not usable in Flame
 
 ### OFX-Side Unresolved
 
-| Item | Details | Priority |
-|------|---------|----------|
-| Filter Preview overflow (27.8) | Preview ignores filter size and fills entire screen in proxy mode | Medium |
-| Use GPU log not output (28.4/28.5) | `log::info!` does not reach host console | Low (no functional impact) |
-| od_is_gpu_active status display (26.8) | No UI to display GPU active status | Low |
+All Phase B items resolved. No remaining OFX-side bugs at this time.
 
 ### Next Steps
 
-1. Open test release: v0.1.10-OFX-v1
+1. Open test release: v0.1.10-OFX-v1 (released)
 2. Phase 2: Abort callback implementation (Known Issue #17)
-3. Investigation and fix of Filter Preview overflow issue (27.8)
-4. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (Known Issue #18), axial aberration flag misreference (Known Issue #19)
-5. Phase 2: Depth image caching for Flame drag responsiveness improvement
+3. Upstream feedback: pixel drift, enum off-by-one, unwired parameters (gamma, focal_plane_offset, noise), catseye enable check missing (Known Issue #18), axial aberration flag misreference (Known Issue #19)
+4. Phase 2: Depth image caching for Flame drag responsiveness improvement

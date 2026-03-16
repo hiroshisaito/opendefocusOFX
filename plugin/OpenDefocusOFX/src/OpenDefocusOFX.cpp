@@ -661,7 +661,7 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     // Filter Preview: render bokeh shape at filter_resolution, centered in output
     // Only for Disc (1) and Blade (2) — Image (3) uses user-provided filter, no bokeh preview
     if (filterPreview && filterType >= 1 && filterType <= 2) {
-        int fRes = filterResolution;
+        int fRes = static_cast<int>(filterResolution * renderScale);
         if (fRes < 32) fRes = 32;
         if (fRes > 1024) fRes = 1024;
 
