@@ -630,7 +630,9 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     od_set_quality(rustHandle_, static_cast<OdQuality>(quality));
     od_set_samples(rustHandle_, static_cast<int32_t>(samples));
     od_set_filter_type(rustHandle_, static_cast<OdFilterType>(filterType));
-    od_set_filter_preview(rustHandle_, filterPreview);
+    // Filter Preview only applies to Disc (1) and Blade (2).
+    // Image (3) uses user-provided filter — must not enter preview path in Rust engine.
+    od_set_filter_preview(rustHandle_, filterPreview && filterType >= 1 && filterType <= 2);
     od_set_filter_resolution(rustHandle_, static_cast<uint32_t>(filterResolution));
     od_set_ring_color(rustHandle_, static_cast<float>(ringColor));
     od_set_inner_color(rustHandle_, static_cast<float>(innerColor));
@@ -1161,7 +1163,7 @@ void OpenDefocusPlugin::getClipPreferences(
     // Standard OFX best practice for multi-input plugins.
     // Note: does NOT resolve Flame's "Unsupported input resolution mix"
     // error — Flame validates clip resolutions at graph level before
-    // calling getClipPreferences.  See references/flame_filter_resolution_fix.md.
+    // calling getClipPreferences.  See Known Issue #12.
     clipPreferences.setClipComponents(*dstClip_, srcClip_->getPixelComponents());
 
     // setClipBitDepth / setPixelAspectRatio require host capability flags;
@@ -1184,7 +1186,7 @@ bool OpenDefocusPlugin::getRegionOfDefinition(
     // which can cause unexpected output dimensions with multi-resolution
     // inputs.  Note: does NOT resolve Flame's "Unsupported input
     // resolution mix" error — Flame validates at graph level before
-    // calling getRegionOfDefinition.  See references/flame_filter_resolution_fix.md.
+    // calling getRegionOfDefinition.  See Known Issue #12.
     if (srcClip_ && srcClip_->isConnected()) {
         rod = srcClip_->getRegionOfDefinition(args.time);
         return true;
