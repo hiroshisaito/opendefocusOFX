@@ -404,7 +404,10 @@
 | 32.12 | Barndoors Enable=true: continuous stripe boundaries (no seams) | PASS | Non-uniform bokeh stripe boundary verification |
 | 32.12a | Astigmatism Enable=true: continuous stripe boundaries (no seams) | PASS | Non-uniform bokeh stripe boundary verification. Global coordinate fix verified |
 | 32.13 | Proxy mode (1/2, 1/4) renderScale correctly applied | PASS | Combination with stripe splitting |
-| 32.14 | Abort during rendering responds immediately between stripes | DEFERRED | OFX version does not call host abort() API. Render-time abort is unimplemented (Known Issue #17). Phase 2 planned |
+| 32.14 | Abort during rendering is reflected between stripes | PASS | NUKE: abort callback works correctly. Flame: UI is blocked during rendering, abort() never returns true — host limitation (N/A) |
+| 32.14a | Output after abort is unprocessed source image | PASS | NUKE: confirmed. Flame: N/A due to 32.14 host limitation |
+| 32.14b | No crash or hang after abort | PASS | NUKE: confirmed. Flame: N/A due to 32.14 host limitation |
+| 32.14c | Filter Preview still works after abort implementation | PASS | Preview path uses nullptr callback — normal operation confirmed |
 | 32.15 | No crash with extreme bokeh size (Size=500+) with large padding | PASS | Rendering takes time but completes without crash. Padding > stripe height case |
 | 32.16 | CPU fallback on GPU failure works correctly within stripe loop | N/A | Stripe splitting resolves root cause (buffer size), GPU succeeds even at 10K+. Cannot trigger fallback. 12K hits NUKE host buffer limit ("Asked for too-large image input") |
 | 32.17 | Multi-frame rendering (Flipbook/Write) with stripe splitting operates stably | PASS | No crash or data cross-contamination between frames |

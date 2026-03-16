@@ -34,7 +34,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v1 (Phase 11: Focus Point)";
+static const char* kDevVersion = "v0.1.10-OFX-v2-dev (Phase C: Abort Callback)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -336,6 +336,11 @@ public:
 
     void render(const OFX::RenderArguments& args) override;
 
+    void copySourceToBuffer(OFX::Image* src,
+                            std::vector<float>& buffer,
+                            int bufWidth, int bufHeight,
+                            const OfxRectI& fetchWindow);
+
     bool isIdentity(const OFX::IsIdentityArguments& args,
                     OFX::Clip*& identityClip,
                     double& identityTime) override;
@@ -434,6 +439,80 @@ private:
 
     OdHandle rustHandle_;
 };
+
+// Copy source pixels into imageBuffer with clamp-to-edge padding.
+// Used both for the initial source copy and for abort fallback
+// (re-populating imageBuffer with pristine source to avoid partial frames).
+void OpenDefocusPlugin::copySourceToBuffer(
+    OFX::Image* src,
+    std::vector<float>& buffer,
+    int bufWidth, int bufHeight,
+    const OfxRectI& fetchWindow)
+{
+    OfxRectI srcBounds = src->getBounds();
+
+    if (srcBounds.x1 < srcBounds.x2 && srcBounds.y1 < srcBounds.y2) {
+        int validX1 = std::min(std::max(fetchWindow.x1, srcBounds.x1), fetchWindow.x2);
+        int validX2 = std::max(std::min(fetchWindow.x2, srcBounds.x2), fetchWindow.x1);
+        int validWidth = validX2 - validX1;
+
+        for (int y = fetchWindow.y1; y < fetchWindow.y2; ++y) {
+            int clampY = std::max(srcBounds.y1, std::min(y, srcBounds.y2 - 1));
+
+            int bufY = y - fetchWindow.y1;
+            float* dstRow = buffer.data() + static_cast<size_t>(bufY) * bufWidth * 4;
+
+            // Centre: memcpy the valid intersection
+            const float* srcRowCenter = (validWidth > 0)
+                ? static_cast<const float*>(src->getPixelAddress(validX1, clampY))
+                : nullptr;
+            if (srcRowCenter && validWidth > 0) {
+                int dstX = validX1 - fetchWindow.x1;
+                std::memcpy(dstRow + dstX * 4, srcRowCenter,
+                            validWidth * 4 * sizeof(float));
+            }
+
+            // Left margin: replicate leftmost source pixel
+            if (fetchWindow.x1 < validX1) {
+                const float* leftPx = static_cast<const float*>(
+                    src->getPixelAddress(srcBounds.x1, clampY));
+                if (leftPx) {
+                    for (int x = fetchWindow.x1; x < validX1; ++x) {
+                        int dstX = x - fetchWindow.x1;
+                        dstRow[dstX * 4 + 0] = leftPx[0];
+                        dstRow[dstX * 4 + 1] = leftPx[1];
+                        dstRow[dstX * 4 + 2] = leftPx[2];
+                        dstRow[dstX * 4 + 3] = leftPx[3];
+                    }
+                }
+            }
+
+            // Right margin: replicate rightmost source pixel
+            if (validX2 < fetchWindow.x2) {
+                const float* rightPx = static_cast<const float*>(
+                    src->getPixelAddress(srcBounds.x2 - 1, clampY));
+                if (rightPx) {
+                    for (int x = validX2; x < fetchWindow.x2; ++x) {
+                        int dstX = x - fetchWindow.x1;
+                        dstRow[dstX * 4 + 0] = rightPx[0];
+                        dstRow[dstX * 4 + 1] = rightPx[1];
+                        dstRow[dstX * 4 + 2] = rightPx[2];
+                        dstRow[dstX * 4 + 3] = rightPx[3];
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Abort callback thunk: casts user_data back to OFX::ImageEffect*
+// and queries the host whether rendering should be cancelled.
+// Called from the Rust stripe loop between stripes (coarse abort).
+extern "C" {
+static bool abortCheckThunk(void* user_data) {
+    return static_cast<OFX::ImageEffect*>(user_data)->abort();
+}
+}
 
 void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     // Validate pixel format
@@ -681,7 +760,8 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
                   static_cast<uint32_t>(fRes), static_cast<uint32_t>(fRes),
                   4, nullptr, 0, 0,
                   nullptr, 0, 0, 0,
-                  pFullRegion, pRenderRegion);
+                  pFullRegion, pRenderRegion,
+                  nullptr, nullptr);
 
         // Clear output to black
         for (int y = rw.y1; y < rw.y2; ++y) {
@@ -765,62 +845,7 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     //    NDK version benefits from NUKE's automatic edge clamping; OFX must do it manually.
     //    Without this, convolution picks up black (0.0f) pixels beyond image edges,
     //    causing dark borders on left/bottom edges.
-    OfxRectI srcBounds = src->getBounds();
-
-    if (srcBounds.x1 < srcBounds.x2 && srcBounds.y1 < srcBounds.y2) {
-        // Clamp to fetchWindow range to prevent underrun when srcBounds
-        // is entirely outside fetchWindow (e.g. extreme viewer panning)
-        int validX1 = std::min(std::max(fetchWindow.x1, srcBounds.x1), fetchWindow.x2);
-        int validX2 = std::max(std::min(fetchWindow.x2, srcBounds.x2), fetchWindow.x1);
-        int validWidth = validX2 - validX1;
-
-        for (int y = fetchWindow.y1; y < fetchWindow.y2; ++y) {
-            int clampY = std::max(srcBounds.y1, std::min(y, srcBounds.y2 - 1));
-
-            int bufY = y - fetchWindow.y1;
-            float* dstRow = imageBuffer.data() + static_cast<size_t>(bufY) * bufWidth * 4;
-
-            // Centre: memcpy the valid intersection
-            const float* srcRowCenter = (validWidth > 0)
-                ? static_cast<const float*>(src->getPixelAddress(validX1, clampY))
-                : nullptr;
-            if (srcRowCenter && validWidth > 0) {
-                int dstX = validX1 - fetchWindow.x1;
-                std::memcpy(dstRow + dstX * 4, srcRowCenter,
-                            validWidth * 4 * sizeof(float));
-            }
-
-            // Left margin: replicate leftmost source pixel
-            if (fetchWindow.x1 < validX1) {
-                const float* leftPx = static_cast<const float*>(
-                    src->getPixelAddress(srcBounds.x1, clampY));
-                if (leftPx) {
-                    for (int x = fetchWindow.x1; x < validX1; ++x) {
-                        int dstX = x - fetchWindow.x1;
-                        dstRow[dstX * 4 + 0] = leftPx[0];
-                        dstRow[dstX * 4 + 1] = leftPx[1];
-                        dstRow[dstX * 4 + 2] = leftPx[2];
-                        dstRow[dstX * 4 + 3] = leftPx[3];
-                    }
-                }
-            }
-
-            // Right margin: replicate rightmost source pixel
-            if (validX2 < fetchWindow.x2) {
-                const float* rightPx = static_cast<const float*>(
-                    src->getPixelAddress(srcBounds.x2 - 1, clampY));
-                if (rightPx) {
-                    for (int x = validX2; x < fetchWindow.x2; ++x) {
-                        int dstX = x - fetchWindow.x1;
-                        dstRow[dstX * 4 + 0] = rightPx[0];
-                        dstRow[dstX * 4 + 1] = rightPx[1];
-                        dstRow[dstX * 4 + 2] = rightPx[2];
-                        dstRow[dstX * 4 + 3] = rightPx[3];
-                    }
-                }
-            }
-        }
-    }
+    copySourceToBuffer(src.get(), imageBuffer, bufWidth, bufHeight, fetchWindow);
 
     // 4. Depth buffer with Clamp to Edge padding
     const float* depthPtr = nullptr;
@@ -971,7 +996,16 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
         filterH,
         filterCh,
         fullRegion,
-        renderRegion);
+        renderRegion,
+        abortCheckThunk,
+        static_cast<void*>(this));
+
+    // On abort: re-populate imageBuffer with pristine source so that
+    // the dst copy below writes clean (unprocessed) source pixels
+    // instead of a partially rendered frame.
+    if (res == ABORTED) {
+        copySourceToBuffer(src.get(), imageBuffer, bufWidth, bufHeight, fetchWindow);
+    }
 
     // Copy result to OFX output (fetchWindow-local → world coords).
     // fetchWindow X may have been trimmed to cap bufWidth, so rw can extend
@@ -1016,7 +1050,7 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
         }
     }
 
-    if (res != OK) {
+    if (res != OK && res != ABORTED) {
         // Log warning but don't throw — the buffer still has valid source data
     }
 }

@@ -52,6 +52,7 @@ typedef enum OdResult {
   ERROR_INVALID_HANDLE = 2,
   ERROR_RENDER_FAILED = 3,
   ERROR_INIT_FAILED = 4,
+  ABORTED = 5,
 } OdResult;
 
 /**
@@ -411,6 +412,8 @@ enum OdResult od_render(OdHandle handle,
                         uint32_t filter_height,
                         uint32_t filter_channels,
                         const int32_t *full_region,
-                        const int32_t *render_region);
+                        const int32_t *render_region,
+                        bool (*abort_check_fn)(void*),
+                        void *abort_user_data);
 
 #endif  /* OPENDEFOCUS_OFX_BRIDGE_H */

@@ -23,6 +23,7 @@ pub enum OdResult {
     ErrorInvalidHandle = 2,
     ErrorRenderFailed = 3,
     ErrorInitFailed = 4,
+    Aborted = 5,
 }
 
 /// Defocus operating mode.
@@ -1037,6 +1038,8 @@ pub unsafe extern "C" fn od_render(
     filter_channels: u32,
     full_region: *const i32,
     render_region: *const i32,
+    abort_check_fn: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
+    abort_user_data: *mut c_void,
 ) -> OdResult {
     // Validate handle
     let inst = match unsafe { get_instance(handle) } {
@@ -1170,9 +1173,17 @@ pub unsafe extern "C" fn od_render(
     let mut y_out = rr[1]; // render_region.y
 
     while y_out < rr[3] {
-        // Abort check between stripes
+        // Abort check between stripes (coarse — Phase 1)
+        // Check global flag (may have been set by upstream internal checks)
         if opendefocus::abort::get_aborted() {
-            return OdResult::Ok;
+            return OdResult::Aborted;
+        }
+        // Check via host callback (if provided)
+        if let Some(check_fn) = abort_check_fn {
+            if unsafe { check_fn(abort_user_data) } {
+                opendefocus::abort::set_aborted(true); // propagate to upstream internals
+                return OdResult::Aborted;
+            }
         }
 
         let y_out_end = (y_out + stripe_h).min(rr[3]);
