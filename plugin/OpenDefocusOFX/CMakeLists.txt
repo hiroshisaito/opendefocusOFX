@@ -51,8 +51,13 @@ target_include_directories(OfxSupport PUBLIC
     ${OFX_SUPPORT_HEADER_DIR})
 
 # --- Plugin shared library ---
-add_library(OpenDefocus SHARED
-    src/OpenDefocusOFX.cpp)
+if(APPLE)
+    add_library(OpenDefocus MODULE
+        src/OpenDefocusOFX.cpp)
+else()
+    add_library(OpenDefocus SHARED
+        src/OpenDefocusOFX.cpp)
+endif()
 
 set_target_properties(OpenDefocus PROPERTIES
     SUFFIX ".ofx"
@@ -67,15 +72,40 @@ target_include_directories(OpenDefocus PRIVATE
     ${RUST_BRIDGE_DIR}/include)
 
 add_dependencies(OpenDefocus rust_bridge)
-target_link_libraries(OpenDefocus PRIVATE
-    OfxSupport
-    ${RUST_STATICLIB}
-    pthread
-    dl
-    m)
+if(APPLE)
+    # Rust staticlib native deps are not propagated through CMake, so we link
+    # the Apple frameworks/runtime that wgpu/Metal and the overlay OpenGL path use.
+    find_library(OPENGL_FRAMEWORK OpenGL REQUIRED)
+    find_library(METAL_FRAMEWORK Metal REQUIRED)
+    find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    find_library(OBJC_LIB objc REQUIRED)
+
+    target_link_libraries(OpenDefocus PRIVATE
+        OfxSupport
+        ${RUST_STATICLIB}
+        ${OPENGL_FRAMEWORK}
+        ${METAL_FRAMEWORK}
+        ${FOUNDATION_FRAMEWORK}
+        ${QUARTZCORE_FRAMEWORK}
+        ${COREFOUNDATION_FRAMEWORK}
+        ${OBJC_LIB})
+else()
+    target_link_libraries(OpenDefocus PRIVATE
+        OfxSupport
+        ${RUST_STATICLIB}
+        pthread
+        dl
+        m)
+endif()
 
 # --- Bundle installation ---
-set(ARCHDIR "Linux-x86-64")
+if(APPLE)
+    set(ARCHDIR "MacOS")
+else()
+    set(ARCHDIR "Linux-x86-64")
+endif()
 set(BUNDLE_DIR "${BUNDLE_ROOT}/OpenDefocusOFX.ofx.bundle/Contents/${ARCHDIR}")
 
 add_custom_command(TARGET OpenDefocus POST_BUILD
@@ -84,7 +114,11 @@ add_custom_command(TARGET OpenDefocus POST_BUILD
     COMMENT "Copying OpenDefocusOFX.ofx to bundle")
 
 # --- System install target ---
-set(SYSTEM_OFX_DIR "/usr/OFX/Plugins")
+if(APPLE)
+    set(SYSTEM_OFX_DIR "/Library/OFX/Plugins")
+else()
+    set(SYSTEM_OFX_DIR "/usr/OFX/Plugins")
+endif()
 install(FILES "$<TARGET_FILE:OpenDefocus>"
     DESTINATION "${SYSTEM_OFX_DIR}/OpenDefocusOFX.ofx.bundle/Contents/${ARCHDIR}"
     RENAME "OpenDefocusOFX.ofx")
