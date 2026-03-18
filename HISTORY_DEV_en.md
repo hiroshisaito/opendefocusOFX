@@ -1714,3 +1714,198 @@ Phase 1 (coarse): abort checked at stripe boundaries only. NDK polls every 10ms 
 3. **Open test feedback**: Monitor and respond to v0.1.10-OFX-v2 tester reports
 4. **Depth image caching**: Flame drag responsiveness improvement (Known Issue #16 mitigation)
 5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation (NDK parity). Requires NUKE/Flame abort() thread safety verification
+
+---
+
+### 2026-03-18 / 2026-03-19: Phase E — macOS Build Support
+
+#### Background
+
+The project was developed entirely on Rocky Linux 8.10 (x86_64) through v0.1.10-OFX-v2. Phase E adds macOS build support, targeting separate x86_64 and arm64 binaries (not universal binary).
+
+Branch: `feature/macos-per-arch-build` (from master at `652de60`)
+
+#### E.1: Build Environment Setup (macOS)
+
+**Host Machine:**
+
+| Item | Version |
+|------|---------|
+| macOS | 15.7 (Sequoia) |
+| CPU | x86_64 (Intel Mac) |
+| CMake | 4.2.3 |
+| C++ Compiler | Apple Clang 17.0.0 |
+
+**Rust Toolchain Installation:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+rustup toolchain install nightly-2025-06-30
+rustup component add rust-src rustc-dev llvm-tools --toolchain nightly-2025-06-30
+```
+
+- Rust stable 1.94.0 installed
+- Nightly `nightly-2025-06-30` installed (required by `upstream/opendefocus/crates/spirv-cli-build/rust-toolchain.toml` for SPIR-V GPU kernel build)
+- Note: `--component` option with `toolchain install` causes errors on some versions; components must be added separately via `rustup component add`
+
+Git submodules already initialized: opendefocus v0.1.10, openfx OFX_Release_1.5.1.
+
+#### E.2: Architecture Investigation
+
+Investigated requirements for building separate x86_64 and arm64 binaries. Full report saved in `references/macOS_arch_build_investigation.md`.
+
+**Key findings:**
+
+1. **Only 1 file requires modification**: `plugin/OpenDefocusOFX/CMakeLists.txt`
+   - All C++ and Rust source code is architecture-independent
+   - No `#ifdef` for ARM/x86 in OpenDefocusOFX.cpp or lib.rs
+   - wgpu/Metal backend handles architecture natively
+
+2. **OFX bundle directory convention** (from `upstream/openfx/HostSupport/src/ofxhPluginCache.cpp` L56-63):
+   - x86_64 host searches `Contents/MacOS-x86-64/`
+   - arm64 host searches `Contents/MacOS/`
+   - Both can coexist in a single bundle
+
+3. **CMakeLists.txt changes needed** (4 areas):
+   - Rust target triple mapping (`CMAKE_OSX_ARCHITECTURES` → Cargo `--target`)
+   - Rust staticlib path branching (`target/<triple>/release/` when `--target` is specified)
+   - Cargo invocation with `--target` flag
+   - ARCHDIR branching (`MacOS-x86-64` for x86_64, `MacOS` for arm64/default)
+
+#### E.3: CMakeLists.txt Modification
+
+Modified `plugin/OpenDefocusOFX/CMakeLists.txt` with 4 changes:
+
+**Change 1 (L20-31): Rust target triple determination**
+
+Added logic to map `CMAKE_OSX_ARCHITECTURES` to Cargo target:
+- `arm64` → `aarch64-apple-darwin`
+- `x86_64` → `x86_64-apple-darwin`
+- Unspecified → empty (host architecture, backward compatible)
+
+**Change 2 (L39-53): Rust staticlib path branching**
+
+When `--target` is specified, Cargo outputs to `target/<triple>/{release,debug}/` instead of `target/{release,debug}/`. Added conditional path construction.
+
+**Change 3 (L64): Cargo invocation with `--target`**
+
+```cmake
+cargo build ${CARGO_BUILD_FLAG} ${CARGO_TARGET_FLAG}
+```
+
+`CARGO_TARGET_FLAG` is empty when `CMAKE_OSX_ARCHITECTURES` is not specified, preserving backward compatibility.
+
+**Change 4 (L131-136): ARCHDIR architecture branching**
+
+```cmake
+if(APPLE)
+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+        set(ARCHDIR "MacOS-x86-64")
+    else()
+        set(ARCHDIR "MacOS")
+    endif()
+```
+
+**Backward compatibility**: All 4 changes produce identical behavior when `CMAKE_OSX_ARCHITECTURES` is not specified. Linux builds are unaffected.
+
+#### E.4: x86_64 Build — Success
+
+```bash
+mkdir -p build-x86_64 && cd build-x86_64
+cmake ../plugin/OpenDefocusOFX -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+make -j$(sysctl -n hw.ncpu)
+```
+
+**Build result:**
+
+| Item | Result |
+|------|--------|
+| Build time | ~5m 08s (initial, all crates downloaded + compiled) |
+| Binary | `bundle/OpenDefocusOFX.ofx.bundle/Contents/MacOS-x86-64/OpenDefocusOFX.ofx` |
+| Architecture | Mach-O 64-bit bundle x86_64 ✅ |
+| Dependencies | OpenGL, Metal, Foundation, QuartzCore, CoreFoundation, libobjc, libc++, libSystem ✅ |
+
+**Compiler warnings: 16 OpenGL deprecation warnings**
+
+All from `OpenDefocusOFX.cpp:163-178` (`OpenDefocusOverlay::draw()` method — Focus Point XY crosshair overlay). Uses OpenGL 1.x/2.x immediate mode API (glPushMatrix, glBegin, glVertex2f, etc.) which Apple deprecated in macOS 10.14 (Mojave, 2018).
+
+This is unavoidable: the OFX overlay drawing API (`OFX::DefaultOverlayDescriptor`, `draw()`) is designed around OpenGL. The OFX host provides an OpenGL context and the plugin draws into it. No Metal/Vulkan alternative exists in the OFX specification. Commercial OFX plugins (BorisFX Sapphire, Frischluft Lenscare) have the same constraint.
+
+The warnings can be silenced with `#define GL_SILENCE_DEPRECATION` before the OpenGL header include, but have no functional impact — OpenGL remains operational on macOS 15.7.
+
+#### E.5: arm64 Build — Success (Cross-Compilation)
+
+Cross-compiled from x86_64 Intel Mac:
+
+```bash
+rustup target add aarch64-apple-darwin
+rustup target add aarch64-apple-darwin --toolchain nightly-2025-06-30
+
+mkdir -p build-arm64 && cd build-arm64
+cmake ../plugin/OpenDefocusOFX -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+make -j$(sysctl -n hw.ncpu)
+```
+
+- Build time: ~1m 24s (Rust crate cache from x86_64 build available, only target-specific recompilation needed)
+- Binary: `bundle/OpenDefocusOFX.ofx.bundle/Contents/MacOS/OpenDefocusOFX.ofx` — Mach-O 64-bit bundle arm64 ✅
+- Apple Clang natively supports `-arch arm64` cross-compilation; no additional tooling required for C++ side
+
+#### E.6: UAT — macOS x86_64 Smoke Test (NUKE)
+
+Test environment: macOS 15.7 (Sequoia), Intel x86_64, NUKE (macOS version).
+Flame not available on this macOS environment — deferred.
+
+**Results: 9 PASS / 2 FAIL / 1 N/A**
+
+| Section | Items | Result |
+|---------|-------|--------|
+| 34. Plugin Loading | 3 | 3 PASS |
+| 35. Basic Rendering | 3 | 3 PASS |
+| 36. GPU / CPU (Metal) | 3 | 2 PASS / 1 N/A |
+| 37. Overlay (OpenGL) | 2 | **2 FAIL** |
+| 38. Render Abort | 1 | 1 PASS |
+
+**FAIL: 37.1 / 37.2 — Focus Point XY Overlay Crash (Known Issue #24)**
+
+- **Symptom**: NUKE crashes when Use Focus Point is enabled on macOS
+- **Trigger**: Enabling the Focus Point XY parameter, which activates the OpenGL overlay (`OpenDefocusOverlay::draw()`)
+- **Root cause**: OpenGL immediate mode API (glPushMatrix, glBegin, glVertex2f, etc.) used in `OpenDefocusOFX.cpp:163-178`. These APIs are deprecated since macOS 10.14 and may cause instability in NUKE's macOS OpenGL context
+- **Linux status**: PASS (OpenGL immediate mode fully supported on Linux)
+- **Impact**: Focus Point XY feature is unusable on macOS. Core rendering (2D mode, Depth mode, GPU/CPU) is unaffected
+- **Workaround**: Do not enable Use Focus Point on macOS. Use Focus Plane parameter directly instead
+- **Classification**: Known Issue #24 (macOS-specific, OpenGL overlay)
+
+#### Build Commands Reference
+
+```bash
+# x86_64
+mkdir -p build-x86_64 && cd build-x86_64
+cmake ../plugin/OpenDefocusOFX -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+make -j$(sysctl -n hw.ncpu)
+
+# arm64
+mkdir -p build-arm64 && cd build-arm64
+cmake ../plugin/OpenDefocusOFX -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+make -j$(sysctl -n hw.ncpu)
+```
+
+#### Bundle Output Structure
+
+```
+bundle/OpenDefocusOFX.ofx.bundle/Contents/
+├── MacOS/OpenDefocusOFX.ofx              ← arm64 (arm64 host searches here)
+├── MacOS-x86-64/OpenDefocusOFX.ofx       ← x86_64 (x86_64 host searches here)
+└── Linux-x86-64/OpenDefocusOFX.ofx       ← Linux (existing)
+```
+
+### Current Status
+
+- **Phase E (macOS Build)**: In progress on `feature/macos-per-arch-build` branch
+  - Environment setup: Complete ✅
+  - Architecture investigation: Complete ✅
+  - CMakeLists.txt modification: Complete ✅
+  - x86_64 build: Success ✅
+  - arm64 build: Success ✅ (cross-compiled from x86_64)
+  - UAT (NUKE macOS x86_64): 9 PASS / 2 FAIL / 1 N/A
+  - **Known Issue #24**: Focus Point XY overlay crash on macOS (OpenGL immediate mode)
+  - Flame macOS testing: Deferred (not available)

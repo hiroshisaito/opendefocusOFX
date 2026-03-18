@@ -598,3 +598,67 @@ A ~1px pixel offset was confirmed between NUKE NDK and OFX versions. The OFX ver
 | Verdict Date | Mar 13 2026 |
 | Verdicted By | Hiroshi |
 | Notes | Stripe-based rendering (14 PASS / 3 DEFERRED / 1 N/A). UHD GPU rendering now works. All position-dependent effects (catseye, barndoors, astigmatism) seamless across stripe boundaries. DEFERRED: 32.10/32.18 are Flame Filter Image platform limitation, not stripe-specific. 32.14 abort unimplemented (Known Issue #17, Phase 2). N/A: 32.16 GPU fallback cannot be triggered (stripe splitting resolves root cause) |
+
+---
+
+## Phase E — macOS Build (x86_64) Smoke Test
+
+### Test Environment
+
+| Item | Details |
+|------|---------|
+| OFX Plugin | `bundle/OpenDefocusOFX.ofx.bundle/Contents/MacOS-x86-64/OpenDefocusOFX.ofx` |
+| Binary | Mach-O 64-bit bundle x86_64 |
+| OS | macOS 15.7 (Sequoia), Intel x86_64 |
+| OFX Host | NUKE (macOS version) |
+| Build | `feature/macos-per-arch-build` branch, Release build |
+| Test Date | |
+| Tester | |
+
+> **Scope**: Minimum smoke test to verify the macOS x86_64 binary loads and renders correctly in NUKE. Flame testing deferred (not available on this macOS environment). Comprehensive testing planned for next version.
+
+### 34. Plugin Loading (macOS)
+
+| # | Test Item | Result | Notes |
+|---|-----------|--------|-------|
+| 34.1 | NUKE recognizes plugin from MacOS-x86-64 bundle path | PASS | |
+| 34.2 | Plugin can be added as a node without crash | PASS | |
+| 34.3 | All parameter groups are displayed in Properties panel | PASS | |
+
+### 35. Basic Rendering (macOS)
+
+| # | Test Item | Result | Notes |
+|---|-----------|--------|-------|
+| 35.1 | 2D mode: uniform defocus renders (Size=10, no Depth) | PASS | |
+| 35.2 | Depth mode: depth-based defocus renders (Depth connected) | PASS | |
+| 35.3 | Size=0 produces passthrough (identical to input) | PASS | |
+
+### 36. GPU / CPU (macOS Metal)
+
+| # | Test Item | Result | Notes |
+|---|-----------|--------|-------|
+| 36.1 | Use GPU=on: rendering completes without crash (Metal backend) | PASS | |
+| 36.2 | Use GPU=off: CPU rendering completes without crash | PASS | |
+| 36.3 | GPU→CPU fallback works if Metal fails | N/A | DevVersion on to check log |
+
+### 37. Overlay (macOS OpenGL)
+
+| # | Test Item | Result | Notes |
+|---|-----------|--------|-------|
+| 37.1 | Focus Point XY crosshair is displayed in viewer | FAIL | Use Focus Point=on | NUKE Crashed if focal point option was turned on.
+| 37.2 | Crosshair can be dragged to change focus position | FAIL | |
+
+### 38. Render Abort (macOS)
+
+| # | Test Item | Result | Notes |
+|---|-----------|--------|-------|
+| 38.1 | Render can be cancelled mid-render (Esc or viewer change) | PASS | Large Size value recommended for testing |
+
+### Phase E UAT
+
+| Item | Result |
+|------|--------|
+| Overall Verdict | CONDITIONAL PASS |
+| Verdict Date | Mar 19 2026 |
+| Verdicted By | Hiroshi |
+| Notes | macOS x86_64 smoke test: 9 PASS / 2 FAIL / 1 N/A. Core rendering (2D, Depth, GPU Metal, CPU, abort) all PASS. FAIL: Focus Point XY overlay causes NUKE crash on macOS (Known Issue #24, OpenGL immediate mode deprecated). GPU→CPU fallback N/A (cannot trigger on test environment). arm64 binary cross-compiled successfully but not runtime-tested (no Apple Silicon machine available) |
