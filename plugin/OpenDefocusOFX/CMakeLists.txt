@@ -17,12 +17,39 @@ set(BUNDLE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../bundle")
 set(RUST_BRIDGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../rust/opendefocus-ofx-bridge")
 set(RUST_TARGET_DIR "${RUST_BRIDGE_DIR}/target")
 
+# --- Rust target triple (macOS per-architecture build) ---
+# Pass -DCMAKE_OSX_ARCHITECTURES=x86_64 or arm64 to select architecture.
+# When not specified, builds for the host architecture (same as before).
+if(APPLE)
+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        set(RUST_TARGET "aarch64-apple-darwin")
+    elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+        set(RUST_TARGET "x86_64-apple-darwin")
+    else()
+        set(RUST_TARGET "")
+    endif()
+endif()
+
+if(RUST_TARGET)
+    set(CARGO_TARGET_FLAG "--target" "${RUST_TARGET}")
+else()
+    set(CARGO_TARGET_FLAG "")
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CARGO_BUILD_FLAG "--release")
-    set(RUST_LIB_DIR "${RUST_TARGET_DIR}/release")
+    if(RUST_TARGET)
+        set(RUST_LIB_DIR "${RUST_TARGET_DIR}/${RUST_TARGET}/release")
+    else()
+        set(RUST_LIB_DIR "${RUST_TARGET_DIR}/release")
+    endif()
 else()
     set(CARGO_BUILD_FLAG "")
-    set(RUST_LIB_DIR "${RUST_TARGET_DIR}/debug")
+    if(RUST_TARGET)
+        set(RUST_LIB_DIR "${RUST_TARGET_DIR}/${RUST_TARGET}/debug")
+    else()
+        set(RUST_LIB_DIR "${RUST_TARGET_DIR}/debug")
+    endif()
 endif()
 
 set(RUST_STATICLIB "${RUST_LIB_DIR}/libopendefocus_ofx_bridge.a")
@@ -34,7 +61,7 @@ set(RUST_STATICLIB "${RUST_LIB_DIR}/libopendefocus_ofx_bridge.a")
 add_custom_target(rust_bridge ALL
     COMMAND ${CMAKE_COMMAND} -E env
         PATH=$ENV{HOME}/.cargo/bin:$ENV{PATH}
-        cargo build ${CARGO_BUILD_FLAG}
+        cargo build ${CARGO_BUILD_FLAG} ${CARGO_TARGET_FLAG}
     WORKING_DIRECTORY "${RUST_BRIDGE_DIR}"
     COMMENT "Building Rust opendefocus-ofx-bridge staticlib"
     VERBATIM)
@@ -102,7 +129,11 @@ endif()
 
 # --- Bundle installation ---
 if(APPLE)
-    set(ARCHDIR "MacOS")
+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+        set(ARCHDIR "MacOS-x86-64")
+    else()
+        set(ARCHDIR "MacOS")
+    endif()
 else()
     set(ARCHDIR "Linux-x86-64")
 endif()

@@ -125,6 +125,12 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 23 | Vertical seam at resolutions > 4096px | Upstream `ChunkHandler` (`chunks.rs`) hardcodes `limit=4096` and splits horizontally when stripe width exceeds this. Chunk boundary produces a visible seam. Same artifact in NDK. Not fixable from OFX side |
 | 19 | Axial Aberration enable flag checks wrong bitflag | `get_axial_aberration_settings()` checks `BARNDOORS_ENABLED` instead of the correct flag (copy-paste error in `internal_settings.rs`) |
 
+### macOS: Known Limitations
+
+| # | Issue | Status | Detail |
+|---|-------|--------|--------|
+| 24 | Focus Point XY overlay crash on macOS | IDENTIFIED | NUKE crashes when Use Focus Point is enabled. The overlay uses OpenGL immediate mode API (glPushMatrix, glBegin, glVertex2f, etc.) which is deprecated since macOS 10.14. Works correctly on Linux. Workaround: do not enable Use Focus Point on macOS; use Focus Plane parameter directly |
+
 ### Architecture
 
 | # | Issue | Status | Detail |
