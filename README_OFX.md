@@ -129,7 +129,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 
 | # | Issue | Status | Detail |
 |---|-------|--------|--------|
-| 24 | Focus Point XY overlay crash on macOS | IDENTIFIED | NUKE crashes when Use Focus Point is enabled. The overlay uses OpenGL immediate mode API (glPushMatrix, glBegin, glVertex2f, etc.) which is deprecated since macOS 10.14. Works correctly on Linux. Workaround: do not enable Use Focus Point on macOS; use Focus Plane parameter directly |
+| 24 | Focus Point XY overlay crash in NUKE macOS | DEFERRED (host-side) | NUKE macOS crashes when Use Focus Point is enabled. Flame macOS works correctly with the same binary. The plugin uses standard OFX overlay API with OpenGL immediate mode (same pattern as OFX SDK examples). The host is responsible for providing a compatible OpenGL context. Not an OFX plugin-side issue. Workaround: do not enable Use Focus Point in NUKE macOS; use Focus Plane parameter directly |
 
 ### Architecture
 
