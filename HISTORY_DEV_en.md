@@ -1869,11 +1869,18 @@ Flame not available on this macOS environment — deferred.
 
 - **Symptom**: NUKE crashes when Use Focus Point is enabled on macOS
 - **Trigger**: Enabling the Focus Point XY parameter, which activates the OpenGL overlay (`OpenDefocusOverlay::draw()`)
-- **Root cause**: OpenGL immediate mode API (glPushMatrix, glBegin, glVertex2f, etc.) used in `OpenDefocusOFX.cpp:163-178`. These APIs are deprecated since macOS 10.14 and may cause instability in NUKE's macOS OpenGL context
 - **Linux status**: PASS (OpenGL immediate mode fully supported on Linux)
-- **Impact**: Focus Point XY feature is unusable on macOS. Core rendering (2D mode, Depth mode, GPU/CPU) is unaffected
-- **Workaround**: Do not enable Use Focus Point on macOS. Use Focus Plane parameter directly instead
-- **Classification**: Known Issue #24 (macOS-specific, OpenGL overlay)
+- **Impact**: Focus Point XY feature is unusable in NUKE macOS. Core rendering (2D mode, Depth mode, GPU/CPU) is unaffected
+- **Workaround**: Do not enable Use Focus Point in NUKE macOS. Use Focus Plane parameter directly instead
+- **Classification**: Known Issue #24 (NUKE macOS-specific, OpenGL overlay)
+
+**Additional verification — Flame 2025 macOS (Intel x86_64):**
+
+Flame 2025 on macOS was tested with the same binary. Focus Point XY overlay displayed correctly, dragging and parameter manipulation all worked without crash. This disproves the initial hypothesis that macOS OpenGL Core Profile was the root cause. The OpenGL immediate mode API (glPushMatrix, glBegin, glVertex2f, etc.) functions correctly on macOS when the host provides a Compatibility Profile context.
+
+**Revised root cause**: The crash is **NUKE macOS-specific**, not a macOS-wide OpenGL issue. Possible causes include NUKE's OpenGL context configuration on macOS (Core Profile vs Compatibility Profile), NUKE version-specific overlay handling, or threading differences in NUKE's macOS implementation.
+
+**Resolution**: Classified as **DEFERRED (host-side issue)**. The plugin uses the standard OFX overlay API with OpenGL immediate mode — the same pattern used by the OFX SDK's own examples (`upstream/openfx/Examples/Overlay/overlay.cpp`). The OFX host is responsible for providing a compatible OpenGL context (Compatibility Profile) for overlay rendering. Flame macOS fulfills this correctly; NUKE macOS does not. Rewriting the overlay to Modern OpenGL (VAO/VBO + shaders) was evaluated but rejected: the cost and risk (12 lines → 100-150 lines, no projection matrix API in OFX, host GL state interference risk) are disproportionate to a host-side compatibility issue. No OFX plugin-side fix will be pursued.
 
 #### Build Commands Reference
 
@@ -1907,5 +1914,5 @@ bundle/OpenDefocusOFX.ofx.bundle/Contents/
   - x86_64 build: Success ✅
   - arm64 build: Success ✅ (cross-compiled from x86_64)
   - UAT (NUKE macOS x86_64): 9 PASS / 2 FAIL / 1 N/A
-  - **Known Issue #24**: Focus Point XY overlay crash on macOS (OpenGL immediate mode)
-  - Flame macOS testing: Deferred (not available)
+  - **Known Issue #24**: Focus Point XY overlay crash — NUKE macOS only (Flame macOS: PASS) — DEFERRED (host-side issue)
+  - Flame macOS (Intel): Tested — overlay PASS, rendering PASS
