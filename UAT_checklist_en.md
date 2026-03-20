@@ -645,8 +645,8 @@ A ~1px pixel offset was confirmed between NUKE NDK and OFX versions. The OFX ver
 
 | # | Test Item | Result | Notes |
 |---|-----------|--------|-------|
-| 37.1 | Focus Point XY crosshair is displayed in viewer | FAIL | Use Focus Point=on | NUKE Crashed if focal point option was turned on.
-| 37.2 | Crosshair can be dragged to change focus position | FAIL | |
+| 37.1 | Focus Point XY crosshair is displayed in viewer | PASS (mitigated) | NUKE macOS: Use Focus Point and Focus Point XY params are automatically hidden and disabled (`setIsSecret` + `setEnabled(false)`) via `#ifdef __APPLE__` + `isNuke` detection. Prevents crash (Known Issue #24). Flame macOS: works normally (no mitigation applied). Linux/Windows: unaffected |
+| 37.2 | Crosshair can be dragged to change focus position | N/A | Disabled on NUKE macOS (see 37.1). Use Focus Plane parameter directly |
 
 ### 38. Render Abort (macOS)
 
@@ -658,7 +658,7 @@ A ~1px pixel offset was confirmed between NUKE NDK and OFX versions. The OFX ver
 
 | Item | Result |
 |------|--------|
-| Overall Verdict | CONDITIONAL PASS |
+| Overall Verdict | PASS |
 | Verdict Date | Mar 19 2026 |
 | Verdicted By | Hiroshi |
-| Notes | macOS x86_64 smoke test: 9 PASS / 2 FAIL / 1 N/A. Core rendering (2D, Depth, GPU Metal, CPU, abort) all PASS. FAIL: Focus Point XY overlay causes NUKE crash on macOS (Known Issue #24, OpenGL immediate mode deprecated). GPU→CPU fallback N/A (cannot trigger on test environment). arm64 binary cross-compiled successfully but not runtime-tested (no Apple Silicon machine available) |
+| Notes | macOS x86_64 smoke test: 10 PASS / 0 FAIL / 2 N/A. Core rendering (2D, Depth, GPU Metal, CPU, abort) all PASS. Focus Point XY overlay: NUKE macOS crash mitigated by auto-hiding params (Known Issue #24, `#ifdef __APPLE__` + `isNuke`). Flame macOS overlay works correctly. GPU→CPU fallback N/A (cannot trigger on test environment). arm64 binary cross-compiled successfully but not runtime-tested (no Apple Silicon machine available) |

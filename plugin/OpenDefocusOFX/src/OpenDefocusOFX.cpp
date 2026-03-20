@@ -1340,6 +1340,9 @@ void OpenDefocusPluginFactory::describeInContext(
     bool isFlame = (hostName.find("Autodesk") != std::string::npos ||
                     hostName.find("Flame")    != std::string::npos ||
                     hostName.find("flame")    != std::string::npos);
+    bool isNuke  = (hostName.find("nuke") != std::string::npos ||
+                    hostName.find("Nuke") != std::string::npos ||
+                    hostName.find("NUKE") != std::string::npos);
 
     // ==========================================================
     // 1. Pages (Tabs) の定義
@@ -1454,12 +1457,17 @@ void OpenDefocusPluginFactory::describeInContext(
     }
 
     // Use Focus Point (toggle)
+    // Disabled on NUKE macOS: NUKE's OpenGL context causes crash with overlay
+    // rendering (Known Issue #24). Flame macOS works correctly.
     {
         OFX::BooleanParamDescriptor* param = desc.defineBooleanParam(kParamUseFocusPoint);
         param->setLabels("Use Focus Point", "Use Focus Point", "Use Focus Point");
         param->setHint("Sample depth at XY position to set focus distance. "
             "Don't animate this - use Focus Plane for animation.");
         param->setDefault(false);
+#ifdef __APPLE__
+        if (isNuke) { param->setIsSecret(true); param->setEnabled(false); }
+#endif
         if (controlsGrp) param->setParent(*controlsGrp);
     }
 
@@ -1471,6 +1479,9 @@ void OpenDefocusPluginFactory::describeInContext(
         param->setDoubleType(OFX::eDoubleTypeXYAbsolute);
         param->setDefaultCoordinateSystem(OFX::eCoordinatesCanonical);
         param->setDefault(25.0, 25.0);
+#ifdef __APPLE__
+        if (isNuke) { param->setIsSecret(true); param->setEnabled(false); }
+#endif
         if (controlsGrp) param->setParent(*controlsGrp);
     }
 
