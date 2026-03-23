@@ -1,6 +1,6 @@
 # OpenDefocus OFX
 
-**Version: v0.1.10-OFX-v2**
+**Version: v0.1.10-OFX-v3**
 
 OpenFX port of [OpenDefocus](https://codeberg.org/gillesvink/opendefocus) — an advanced open-source convolution library for image post-processing.
 
@@ -33,7 +33,7 @@ In the NDK version, NUKE's host engine splits the image into horizontal stripes 
 ### Prerequisites
 
 - **CMake** 3.20+
-- **C++17** compiler (GCC 8+ / Clang 7+)
+- **C++17** compiler (GCC 8+ on Linux / Apple Clang 14+ on macOS)
 - **Rust** stable (1.92+) and the nightly toolchain listed in `upstream/opendefocus/crates/spirv-cli-build/rust-toolchain.toml`
 - **OpenFX SDK** — included as a git submodule (`upstream/openfx/`)
 - **OpenDefocus** — included as a git submodule (`upstream/opendefocus/`)
@@ -64,7 +64,12 @@ make -j$(nproc)
 
 The built plugin is automatically copied to the bundle directory:
 ```
+# Linux
 bundle/OpenDefocusOFX.ofx.bundle/Contents/Linux-x86-64/OpenDefocusOFX.ofx
+# macOS (Intel)
+bundle/OpenDefocusOFX.ofx.bundle/Contents/MacOS-x86-64/OpenDefocusOFX.ofx
+# macOS (Apple Silicon)
+bundle/OpenDefocusOFX.ofx.bundle/Contents/MacOS/OpenDefocusOFX.ofx
 ```
 
 ### Installation
@@ -72,10 +77,13 @@ bundle/OpenDefocusOFX.ofx.bundle/Contents/Linux-x86-64/OpenDefocusOFX.ofx
 Copy the bundle to your OFX plugin path:
 
 ```bash
-# System-wide
+# Linux (system-wide)
 sudo cp -r bundle/OpenDefocusOFX.ofx.bundle /usr/OFX/Plugins/
 
-# Or set OFX_PLUGIN_PATH
+# macOS (system-wide)
+sudo cp -r bundle/OpenDefocusOFX.ofx.bundle /Library/OFX/Plugins/
+
+# Or set OFX_PLUGIN_PATH (both platforms)
 export OFX_PLUGIN_PATH=/path/to/bundle/parent
 ```
 

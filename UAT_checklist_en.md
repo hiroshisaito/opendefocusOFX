@@ -1,12 +1,13 @@
-# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v1
+# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v3
 
 ## Test Environment
 
 | Item | Details |
 |------|---------|
-| OFX Plugin | `bundle/OpenDefocusOFX.ofx.bundle/Contents/Linux-x86-64/OpenDefocusOFX.ofx` |
+| OFX Plugin | `bundle/OpenDefocusOFX.ofx.bundle/Contents/<arch>/OpenDefocusOFX.ofx` |
 | Reference | OpenDefocus Nuke NDK v0.1.10 |
-| OS | Rocky Linux 8.10 (x86_64) |
+| OS (Linux) | Rocky Linux 8.10 (x86_64) |
+| OS (macOS) | macOS 15.7 Sequoia (Intel x86_64) — Phase E |
 | OFX Host | NUKE 16.0, Flame 2026 |
 | Test Date | Feb 25 2026 |
 | Tester | Hiroshi |
