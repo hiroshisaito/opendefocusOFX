@@ -18,6 +18,9 @@ compile_commands.json
 # OFX bundle (built binary)
 bundle/
 
+# Release artifacts
+release/
+
 # Plugin build artifacts
 plugin/OpenDefocusOFX/cmake/
 
