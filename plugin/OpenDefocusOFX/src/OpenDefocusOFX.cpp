@@ -34,7 +34,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v3-dev (Phase E: Coordinate Fix)";
+static const char* kDevVersion = "v0.1.10-OFX-v4-dev (Review Fixes)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -527,9 +527,9 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     std::unique_ptr<OFX::Image> src(
         (srcClip_ && srcClip_->isConnected())
             ? srcClip_->fetchImage(args.time) : nullptr);
-    std::unique_ptr<OFX::Image> depth(
-        (depthClip_ && depthClip_->isConnected())
-            ? depthClip_->fetchImage(args.time) : nullptr);
+    // Depth clip is fetched later, only when mode == Depth (1).
+    // Avoids unnecessary upstream re-evaluation in 2D mode and Filter Preview.
+    std::unique_ptr<OFX::Image> depth;
 
     if (!dst || !src) {
         OFX::throwSuiteStatusException(kOfxStatFailed);
@@ -838,10 +838,15 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     copySourceToBuffer(src.get(), imageBuffer, bufWidth, bufHeight, fetchWindow);
 
     // 4. Depth buffer with Clamp to Edge padding
+    //    Fetch depth clip only in Depth mode (mode == 1).
+    //    NDK: fetch_depth() is guarded by !is_2d() — same logic.
     const float* depthPtr = nullptr;
     uint32_t depthW = 0, depthH = 0;
     std::vector<float> depthBuffer;
 
+    if (mode == 1 && depthClip_ && depthClip_->isConnected()) {
+        depth.reset(depthClip_->fetchImage(args.time));
+    }
     bool useDepth = (mode == 1) && depth;
     if (useDepth) {
         depthBuffer.resize(static_cast<size_t>(bufWidth) * bufHeight, 0.0f);
@@ -1140,17 +1145,21 @@ void OpenDefocusPlugin::getRegionsOfInterest(
     double effectiveRadius = (mode == 1) ? std::max(size, maxSize) : size;
     effectiveRadius *= sizeMultiplier;
 
-    // Margin in canonical coordinates
+    // Margin in canonical coordinates — Y axis only.
+    // X axis is NOT expanded: the render buffer uses fetchWindow width
+    // (= renderWindow width) and wgpu ClampToEdge handles X edge sampling.
+    // Expanding X in RoI would cause the host to compute unnecessary
+    // upstream work, worsening Flame responsiveness (Known Issue #16).
     double margin = std::ceil(effectiveRadius) + 1.0;
 
     OfxRectD srcRoI = args.regionOfInterest;
-    srcRoI.x1 -= margin;
     srcRoI.y1 -= margin;
-    srcRoI.x2 += margin;
     srcRoI.y2 += margin;
 
-    if (srcClip_)   rois.setRegionOfInterest(*srcClip_, srcRoI);
-    if (depthClip_) rois.setRegionOfInterest(*depthClip_, srcRoI);
+    if (srcClip_) rois.setRegionOfInterest(*srcClip_, srcRoI);
+    // Depth clip: only needed in Depth mode (mode == 1).
+    // In 2D mode, skip to avoid unnecessary upstream re-evaluation.
+    if (depthClip_ && mode == 1) rois.setRegionOfInterest(*depthClip_, srcRoI);
     // Filter clip: bokeh shape image, no expansion needed
 }
 
