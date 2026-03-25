@@ -430,6 +430,22 @@
 | 33.10 | Flame GUI responsiveness is improved | PASS | Noticeable improvement, still slower than NUKE |
 | 33.11 | Multi-frame rendering (Flipbook/Write) stable | PASS | HD Depth mode, Focal Plane animation, 120 frames — no crash or render error |
 
+### 35. Phase E: Coordinate System Fix — Position-Dependent Effects NDK Parity
+
+Test conditions: checker pattern test image, A/B comparison with NDK version
+
+| # | Test Item | Result | Notes |
+|---|-----------|--------|-------|
+| 35.1 | Catseye Amount=2,0 produces NDK-equivalent effect intensity | PASS | Compare with checker_testpattern_defocus_catseye_NDK.png |
+| 35.2 | Barndoors Amount=1,0 produces NDK-equivalent effect intensity | PASS | Compare with checker_testpattern_defocus_barndoor_NDK.png |
+| 35.3 | Astigmatism produces NDK-equivalent effect intensity | PASS | |
+| 35.4 | Catseye stripe boundary seamless | PASS | Retest 32.11 |
+| 35.5 | Barndoors stripe boundary seamless | PASS | Retest 32.12 |
+| 35.6 | Astigmatism stripe boundary seamless | PASS | Retest 32.12a |
+| 35.7 | Proxy mode (1/2, 1/4) position-dependent effects normal | PASS | |
+| 35.8 | UHD+ resolution renders correctly | PASS | |
+| 35.9 | Focus Point + catseye/barndoors works correctly | PASS | Depth mode + Focus Point ON. NDK-equivalent output confirmed |
+
 ## 31. Known Constraints (Out of Scope for This Version)
 
 The following are not implemented in v0.1.10-OFX-v1 and are out of test scope:

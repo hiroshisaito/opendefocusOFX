@@ -1158,6 +1158,11 @@ pub unsafe extern "C" fn od_render(
     let total_img_pixels = (image_height as usize) * img_w * img_ch;
     let source_image = unsafe { std::slice::from_raw_parts(image_data, total_img_pixels) }.to_vec();
 
+    // Buffer Y origin: fr[1] is the RoD-based Y of the buffer's first row.
+    // All y_in/y_out values are RoD-based, so subtract buf_y_origin to get
+    // buffer-local row indices for memory access.
+    let buf_y_origin = fr[1];
+
     // Helper to extract panic message
     let panic_msg = |info: Box<dyn std::any::Any + Send>| -> String {
         if let Some(s) = info.downcast_ref::<&str>() {
@@ -1202,7 +1207,9 @@ pub unsafe extern "C" fn od_render(
         // Copy fresh source pixels into the pre-allocated stripe buffer.
         // This ensures each stripe always sees un-rendered source pixels,
         // even in padding areas that overlap with previously rendered stripes.
-        let img_offset = (y_in as usize) * img_w * img_ch;
+        // y_in is RoD-based; subtract buf_y_origin to get buffer-local row index.
+        let buf_y_in = (y_in - buf_y_origin) as usize;
+        let img_offset = buf_y_in * img_w * img_ch;
         let img_count = stripe_h_in * img_w * img_ch;
         stripe_buf[..img_count].copy_from_slice(&source_image[img_offset..img_offset + img_count]);
 
@@ -1238,7 +1245,7 @@ pub unsafe extern "C" fn od_render(
 
         // Build stripe depth Array2 from raw pointer
         let stripe_depth = if has_depth {
-            let d_offset = (y_in as usize) * dep_w;
+            let d_offset = buf_y_in * dep_w;
             let d_count = stripe_h_in * dep_w;
             let d_slice = unsafe { std::slice::from_raw_parts(depth_data.add(d_offset), d_count) };
             match Array2::from_shape_vec(
@@ -1261,7 +1268,9 @@ pub unsafe extern "C" fn od_render(
             let y_render_end = (y_out_end - y_in) as usize;
             let render_src_offset = y_render_start * img_w * img_ch;
             let render_count = (y_render_end - y_render_start) * img_w * img_ch;
-            let out_offset = (y_out as usize) * img_w * img_ch;
+            // y_out is RoD-based; subtract buf_y_origin for buffer-local offset
+            let buf_y_out = (y_out - buf_y_origin) as usize;
+            let out_offset = buf_y_out * img_w * img_ch;
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     buf.as_ptr().add(render_src_offset),
@@ -1329,7 +1338,7 @@ pub unsafe extern "C" fn od_render(
                 };
 
                 let retry_depth = if has_depth {
-                    let d_offset = (y_in as usize) * dep_w;
+                    let d_offset = buf_y_in * dep_w;
                     let d_count = stripe_h_in * dep_w;
                     let d_slice = unsafe { std::slice::from_raw_parts(depth_data.add(d_offset), d_count) };
                     Array2::from_shape_vec((stripe_h_in, dep_w), d_slice.to_vec()).ok()

@@ -115,7 +115,7 @@ The plugin uses `renderScale.x` only (assumes uniform scaling). NUKE and Flame a
 | 10 | Bokeh parameter grayout not restoring | FIXED | Visibility logic corrected |
 | 11 | Filter Preview black in Depth mode | FIXED | State initialization corrected |
 | 21 | Edge-fold artifact at resolutions > 4096px | FIXED | Removed obsolete `bufWidth` 4096 cap. Stripe-based rendering keeps per-stripe buffers under wgpu 128MB limit, so full-width buffers (5K, 8K+) are safe |
-| 22 | Catseye/Barndoors/Astigmatism NDK parity | IDENTIFIED | Position-dependent effects produce slightly weaker results than NDK. Root cause: `center` (fetchWindow-local) and `full_region` (buffer-local) coordinate system mismatch in `distance_to_screen_center` calculation. Fix requires coordinate system alignment across stripe loop, overscan, and proxy — planned for future phase |
+| 22 | Catseye/Barndoors/Astigmatism NDK parity | FIXED | Phase E: fullRegion and renderRegion converted from fetchWindow-local to RoD-based coordinates, matching NDK's box-local coordinate system. All position-dependent effects now produce NDK-equivalent output |
 
 ### Upstream-Originated (DEFERRED)
 
@@ -132,6 +132,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 18 | Catseye applied when disabled (Barndoor interaction) | `calculate_catseye()` in the kernel is called unconditionally without checking `CATSEYE_ENABLED` flag. When Barndoor Enable=on triggers the non-uniform path, catseye effects are applied even with Catseye Enable=off. Barndoors and Astigmatism correctly check their enable flags |
 | 23 | Vertical seam at resolutions > 4096px | Upstream `ChunkHandler` (`chunks.rs`) hardcodes `limit=4096` and splits horizontally when stripe width exceeds this. Chunk boundary produces a visible seam. Same artifact in NDK. Not fixable from OFX side |
 | 19 | Axial Aberration enable flag checks wrong bitflag | `get_axial_aberration_settings()` checks `BARNDOORS_ENABLED` instead of the correct flag (copy-paste error in `internal_settings.rs`) |
+| 25 | Depth map edge visible in foreground bokeh | In Depth mode, depth map edges are visible in bokeh of foreground areas (closer than focal plane). CoC values are computed directly from raw depth without spatial smoothing. `bilinear_depth_based()` bilateral sampling preserves depth discontinuities rather than smoothing them. No depth preprocessing (blur/dilation) is applied before kernel rendering. Same artifact confirmed in NDK |
 
 ### macOS: Known Limitations
 

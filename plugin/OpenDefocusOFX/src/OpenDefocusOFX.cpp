@@ -34,7 +34,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v3";
+static const char* kDevVersion = "v0.1.10-OFX-v3-dev (Phase E: Coordinate Fix)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -948,24 +948,36 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     od_set_resolution(rustHandle_, static_cast<uint32_t>(rodW),
                       static_cast<uint32_t>(rodH));
 
-    // Optical center in fetchWindow-local coordinates
-    double centerWorldX = (rod.x1 + rod.x2) / 2.0 * renderScale;
-    double centerWorldY = (rod.y1 + rod.y2) / 2.0 * renderScale;
+    // Optical center in RoD-local coordinates (matching NDK's box-local center).
+    // NDK: center = center_xy() - box().xy() — image center relative to format box origin.
+    // OFX: center = rod_size / 2 — image center relative to RoD origin.
+    // Both give the same result when the image starts at (0,0).
+    double centerX = (rod.x2 - rod.x1) / 2.0 * renderScale;
+    double centerY = (rod.y2 - rod.y1) / 2.0 * renderScale;
     od_set_center(rustHandle_,
-                  static_cast<float>(centerWorldX - fetchWindow.x1),
-                  static_cast<float>(centerWorldY - fetchWindow.y1));
+                  static_cast<float>(centerX),
+                  static_cast<float>(centerY));
 
-    // renderRegion in buffer-local coordinates, clamped to buffer bounds.
+    // fullRegion and renderRegion in RoD-local coordinates.
+    // NDK passes both process_box and stripe_region as (value - info_.box()),
+    // i.e. relative to the format box origin.  OFX equivalent is RoD origin.
+    // get_real_coordinates() computes: real_position = full_region.xy + pixel_coords
+    // This must produce RoD-based screen-space positions that are consistent
+    // with center (also RoD-based) for correct distance_to_screen_center.
+    int rodX1 = static_cast<int>(rod.x1 * renderScale);
+    int rodY1 = static_cast<int>(rod.y1 * renderScale);
+
     int32_t fullRegion[4] = {
-        0, 0,
-        static_cast<int32_t>(bufWidth),
-        static_cast<int32_t>(bufHeight)
+        static_cast<int32_t>(fetchWindow.x1 - rodX1),
+        static_cast<int32_t>(fetchWindow.y1 - rodY1),
+        static_cast<int32_t>(fetchWindow.x2 - rodX1),
+        static_cast<int32_t>(fetchWindow.y2 - rodY1)
     };
     int32_t renderRegion[4] = {
-        static_cast<int32_t>(std::max(0, rw.x1 - fetchWindow.x1)),
-        static_cast<int32_t>(std::max(0, rw.y1 - fetchWindow.y1)),
-        static_cast<int32_t>(std::min(bufWidth,  rw.x2 - fetchWindow.x1)),
-        static_cast<int32_t>(std::min(bufHeight, rw.y2 - fetchWindow.y1))
+        static_cast<int32_t>(rw.x1 - rodX1),
+        static_cast<int32_t>(rw.y1 - rodY1),
+        static_cast<int32_t>(rw.x2 - rodX1),
+        static_cast<int32_t>(rw.y2 - rodY1)
     };
 
     od_set_aborted(rustHandle_, false);
