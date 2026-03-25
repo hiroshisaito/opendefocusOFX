@@ -1,5 +1,5 @@
 // OpenDefocus OFX Plugin
-// v0.1.10-OFX-v1
+// v0.1.10-OFX (see kDevVersion for current build version)
 //
 // Porting of OpenDefocus (Nuke NDK) to OpenFX standard.
 // This plugin calls into the OpenDefocus Rust core via extern "C" FFI bridge.
@@ -1366,7 +1366,7 @@ void OpenDefocusPluginFactory::describeInContext(
                     hostName.find("NUKE") != std::string::npos);
 
     // ==========================================================
-    // 1. Pages (Tabs) の定義
+    // 1. Page (Tab) definitions
     // ==========================================================
     OFX::PageParamDescriptor* controlsPage   = desc.definePageParam("Controls");
     OFX::PageParamDescriptor* bokehPage      = desc.definePageParam("Bokeh");
@@ -1379,23 +1379,23 @@ void OpenDefocusPluginFactory::describeInContext(
     if (advancedPage)   advancedPage->setLabels(isFlame ? "Page 4" : "Advanced", isFlame ? "Page 4" : "Advanced", isFlame ? "Page 4" : "Advanced");
 
     // ==========================================================
-    // 2. Groups (階層の器) の定義 — 定義順 = UI表示順
+    // 2. Group definitions — definition order = UI display order
     // ==========================================================
-    // Controls (1番目)
+    // Controls (1st)
     OFX::GroupParamDescriptor* controlsGrp   = desc.defineGroupParam("ControlsGroup");
-    // Bokeh (2番目)
+    // Bokeh (2nd)
     OFX::GroupParamDescriptor* bokehGrp      = desc.defineGroupParam("BokehGroup");
-    // Flame専用: Bokeh Noise サブグループ
+    // Flame-only: Bokeh Noise subgroup
     OFX::GroupParamDescriptor* bokehNoiseGrp = isFlame ? desc.defineGroupParam("BokehNoiseGroup") : nullptr;
-    // NUKE専用: Non-Uniform 親グループ (3番目)
+    // NUKE-only: Non-Uniform parent group (3rd)
     OFX::GroupParamDescriptor* nonUniformGrp = isFlame ? nullptr : desc.defineGroupParam("NonUniformGroup");
-    // Flame専用: Catseye / Barndoors サブグループ
+    // Flame-only: Catseye / Barndoors subgroups
     OFX::GroupParamDescriptor* catseyeGrp    = isFlame ? desc.defineGroupParam("CatseyeGroup") : nullptr;
     OFX::GroupParamDescriptor* barndoorsGrp  = isFlame ? desc.defineGroupParam("BarndoorsGroup") : nullptr;
-    // Flame専用: Astigmatism / Axial Aberration サブグループ
+    // Flame-only: Astigmatism / Axial Aberration subgroups
     OFX::GroupParamDescriptor* astigmatismGrp      = isFlame ? desc.defineGroupParam("AstigmatismGroup") : nullptr;
     OFX::GroupParamDescriptor* axialAberrationGrp  = isFlame ? desc.defineGroupParam("AxialAberrationGroup") : nullptr;
-    // Advanced (最後)
+    // Advanced (last)
     OFX::GroupParamDescriptor* advancedGrp   = desc.defineGroupParam("AdvancedGroup");
 
     if (controlsGrp)   { controlsGrp->setLabels("Controls", "Controls", "Controls"); controlsGrp->setOpen(true); }
@@ -1409,16 +1409,16 @@ void OpenDefocusPluginFactory::describeInContext(
     if (advancedGrp)   { advancedGrp->setLabels("Advanced", "Advanced", "Advanced"); advancedGrp->setOpen(true); }
 
     // ==========================================================
-    // 3. Topology (親子関係のルーティング)
+    // 3. Topology (parent-child routing)
     // ==========================================================
     if (!isFlame) {
-        // 【NUKE / Resolve】: 入れ子なし！ 4つのメイングループをそのままタブに入れるだけ
+        // NUKE / Resolve: no nesting — add 4 main groups directly to tabs
         if (controlsPage && controlsGrp)     controlsPage->addChild(*controlsGrp);
         if (bokehPage && bokehGrp)           bokehPage->addChild(*bokehGrp);
         if (nonUniformPage && nonUniformGrp) nonUniformPage->addChild(*nonUniformGrp);
         if (advancedPage && advancedGrp)     advancedPage->addChild(*advancedGrp);
     } else {
-        // 【Flame】: すべてのグループを独立した列として並べる
+        // Flame: lay out all groups as independent columns
         if (controlsPage && controlsGrp)     controlsPage->addChild(*controlsGrp);
         if (bokehPage && bokehGrp)           bokehPage->addChild(*bokehGrp);
         if (bokehPage && bokehNoiseGrp)      bokehPage->addChild(*bokehNoiseGrp);
@@ -1430,7 +1430,7 @@ void OpenDefocusPluginFactory::describeInContext(
     }
 
     // ==========================================================
-    // 4. パラメータの定義
+    // 4. Parameter definitions
     // ==========================================================
 
     // Dev Version (read-only label)

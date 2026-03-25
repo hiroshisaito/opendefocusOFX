@@ -1951,6 +1951,16 @@ Test environment: NUKE (Linux), checker pattern test image, A/B comparison with 
 
 During testing, depth map edges were observed in foreground bokeh (closer than focal plane). Confirmed same artifact in NDK. Root cause is upstream: CoC values computed from raw depth without spatial smoothing, bilateral sampling preserves depth discontinuities. Classified as upstream-originated DEFERRED.
 
+### 2026-03-25: Review Fixes (post Phase E)
+
+Code review identified two performance/correctness issues unrelated to the coordinate fix:
+
+1. **Depth clip fetchImage guard**: In 2D mode and Filter Preview, the Depth clip was fetched unconditionally via `fetchImage()`, triggering unnecessary upstream node tree re-evaluation. NDK guards this with `!is_2d()`. Fixed by guarding with `mode == 1` (Depth mode). Also guarded Depth RoI to skip upstream evaluation in 2D mode.
+
+2. **RoI X overscan removal**: The Region of Interest expanded both X and Y axes by the blur margin, but the actual render buffer (`fetchWindow`) only expands Y. X-axis edges are handled by wgpu `ClampToEdge`. The X expansion caused the host to compute unnecessary upstream work, worsening Flame GUI responsiveness (Known Issue #16). Removed X-axis margin from RoI.
+
+**Commit**: 6fe82e5
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete
@@ -1960,6 +1970,7 @@ During testing, depth map edges were observed in foreground bokeh (closer than f
 - **Phase D (Stripe Perf Optimize)**: Complete — buffer pre-allocation, stripe height increase, bufWidth cap removal
 - **Phase E (macOS Build)**: Complete — x86_64 and arm64 builds, Known Issue #24 (NUKE macOS overlay) mitigated
 - **Phase E (Coordinate Fix)**: Complete — NDK parity for catseye/barndoors/astigmatism (Known Issue #22 FIXED)
+- **Review Fixes**: Complete — Depth fetch guard, RoI X overscan removal
 - **v0.1.10-OFX-v3**: Released (2026-03-23) — Linux + macOS
 
 ### OFX-Side Unresolved
@@ -1976,17 +1987,17 @@ During testing, depth map edges were observed in foreground bokeh (closer than f
 | 2 | Focal Plane Offset not connected | NDK knob exists, ConvolveSettings unwired |
 | 3 | Bokeh Noise feature flag disabled | apply_noise() stubbed out |
 | 4 | Axial Aberration enum off-by-one | Protobuf 0,1,2 vs Rust 1,2,3 |
-| 5 | NDK/OFX ~1px pixel drift | Coordinate system difference |
-| 6 | CPU/GPU ~1px pixel drift | Backend difference |
-| 18 | Catseye enable check missing | calculate_catseye() unconditional |
-| 19 | Axial Aberration flag misreference | Checks BARNDOORS_ENABLED |
-| 23 | ChunkHandler vertical seam >4096px | Hardcoded limit=4096 |
-| 25 | Depth map edge in foreground bokeh | No depth smoothing before kernel |
+| 5 | NDK/OFX ~1px pixel drift | OFX standard coordinate system compliance; imperceptible at 2K+ |
+| 6 | CPU/GPU ~1px pixel drift | Minor rendering difference between CPU and GPU backends |
+| 18 | Catseye enable check missing | calculate_catseye() unconditional in non_uniform.rs |
+| 19 | Axial Aberration flag misreference | Checks BARNDOORS_ENABLED instead of correct flag (copy-paste in internal_settings.rs) |
+| 23 | ChunkHandler vertical seam >4096px | Hardcoded limit=4096, splits horizontally, chunk boundary produces visible seam |
+| 25 | Depth map edge in foreground bokeh | No depth smoothing before kernel; bilateral sampling preserves discontinuities |
 
 ### Next Steps
 
 1. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
 2. **Open test feedback**: Monitor and respond to tester reports
-3. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix
-4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
-5. **Depth image caching** (LOW): Flame drag responsiveness improvement
+3. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes (Depth fetch guard, RoI X overscan removal), comment cleanup
+4. **Windows build support**: Build environment setup pending
+5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation

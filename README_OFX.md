@@ -130,15 +130,15 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 6 | CPU/GPU ~1px pixel drift | Minor rendering difference between CPU and GPU backends. Same behavior in NDK |
 | 7 | Size Multiplier bokeh breakdown at large values | Bokeh collapses or grey regions appear at large Size Multiplier values. Normal when equivalent size is set via Size/MaxSize parameters. Similar symptom in NDK |
 | 18 | Catseye applied when disabled (Barndoor interaction) | `calculate_catseye()` in the kernel is called unconditionally without checking `CATSEYE_ENABLED` flag. When Barndoor Enable=on triggers the non-uniform path, catseye effects are applied even with Catseye Enable=off. Barndoors and Astigmatism correctly check their enable flags |
-| 23 | Vertical seam at resolutions > 4096px | Upstream `ChunkHandler` (`chunks.rs`) hardcodes `limit=4096` and splits horizontally when stripe width exceeds this. Chunk boundary produces a visible seam. Same artifact in NDK. Not fixable from OFX side |
 | 19 | Axial Aberration enable flag checks wrong bitflag | `get_axial_aberration_settings()` checks `BARNDOORS_ENABLED` instead of the correct flag (copy-paste error in `internal_settings.rs`) |
+| 23 | Vertical seam at resolutions > 4096px | Upstream `ChunkHandler` (`chunks.rs`) hardcodes `limit=4096` and splits horizontally when stripe width exceeds this. Chunk boundary produces a visible seam. Same artifact in NDK. Not fixable from OFX side |
 | 25 | Depth map edge visible in foreground bokeh | In Depth mode, depth map edges are visible in bokeh of foreground areas (closer than focal plane). CoC values are computed directly from raw depth without spatial smoothing. `bilinear_depth_based()` bilateral sampling preserves depth discontinuities rather than smoothing them. No depth preprocessing (blur/dilation) is applied before kernel rendering. Same artifact confirmed in NDK |
 
 ### macOS: Known Limitations
 
 | # | Issue | Status | Detail |
 |---|-------|--------|--------|
-| 24 | Focus Point XY overlay crash in NUKE macOS | MITIGATED (host-side) | NUKE macOS crashes when Use Focus Point is enabled. Flame macOS works correctly with the same binary. The plugin uses standard OFX overlay API with OpenGL immediate mode (same pattern as OFX SDK examples). The host is responsible for providing a compatible OpenGL context. **Mitigation**: on macOS + NUKE, the Use Focus Point and Focus Point XY parameters are automatically hidden and disabled (`setIsSecret` + `setEnabled(false)`, guarded by `#ifdef __APPLE__`). Use Focus Plane parameter directly. Linux/Windows NUKE and all Flame builds are unaffected |
+| 24 | Focus Point XY overlay crash in NUKE macOS | MITIGATED (host-side) | NUKE macOS crashes when Use Focus Point is enabled. Flame macOS works correctly with the same binary. The plugin uses standard OFX overlay API with OpenGL immediate mode (same pattern as OFX SDK examples). The host is responsible for providing a compatible OpenGL context. **Mitigation**: on macOS + NUKE, the Use Focus Point and Focus Point XY parameters are automatically hidden and disabled (`setIsSecret` + `setEnabled(false)`, guarded by `#ifdef __APPLE__`). Use Focus Plane parameter directly. Linux NUKE and all Flame builds are unaffected |
 
 ### Architecture
 
@@ -180,6 +180,8 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 ├── HISTORY_DEV_en.md          # Development history (English)
 └── UAT_checklist_en.md        # UAT test checklist (English)
 ```
+
+Local-only files (gitignored): `HISTORY_DEV_ja.md`, `UAT_checklist_ja.md`, `OPTIMIZATION_REPORT.md`, `references/`
 
 ## Original Project & Acknowledgments
 
