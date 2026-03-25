@@ -1906,14 +1906,87 @@ bundle/OpenDefocusOFX.ofx.bundle/Contents/
 └── Linux-x86-64/OpenDefocusOFX.ofx       ← Linux (existing)
 ```
 
+---
+
+### 2026-03-25: Phase E (Continued) — Coordinate System Fix
+
+#### Background
+
+Known Issue #22: Position-dependent effects (catseye, barndoors, astigmatism) produced weaker results than NDK. Root cause was coordinate system mismatch — `center` was RoD-based but `fullRegion`/`renderRegion` were fetchWindow-local (buffer origin = 0,0). The upstream kernel computes `real_position = full_region.xy + coordinates`, which must be in the same coordinate system as `center` for correct `distance_to_screen_center` calculation.
+
+Branch: `feature/coordinate-fix`
+
+#### Changes
+
+**C++ side** (OpenDefocusOFX.cpp):
+- Compute `rodX1`, `rodY1` from RoD × renderScale
+- `fullRegion`: `{fetchWindow - rod}` instead of `{0, 0, bufWidth, bufHeight}`
+- `renderRegion`: `{rw - rod}` instead of `{rw - fetchWindow}`
+- All three (center, fullRegion, renderRegion) now share the same RoD-based origin
+
+**Rust side** (lib.rs):
+- Introduce `buf_y_origin = fr[1]` — the RoD-based Y of the buffer's first row
+- All buffer memory access: `y_in - buf_y_origin` instead of `y_in`
+- Stripe source copy, render region copy-back, depth offset, GPU retry path all updated
+
+#### UAT
+
+Test environment: NUKE (Linux), checker pattern test image, A/B comparison with NDK
+
+| # | Test Item | Result |
+|---|-----------|--------|
+| 35.1 | Catseye Amount=2,0 NDK parity | PASS |
+| 35.2 | Barndoors Amount=1,0 NDK parity | PASS |
+| 35.3 | Astigmatism NDK parity | PASS |
+| 35.4 | Catseye stripe boundary seamless | PASS |
+| 35.5 | Barndoors stripe boundary seamless | PASS |
+| 35.6 | Astigmatism stripe boundary seamless | PASS |
+| 35.7 | Proxy mode position-dependent effects | PASS |
+| 35.8 | UHD+ resolution | PASS |
+| 35.9 | Focus Point + catseye/barndoors | PASS |
+
+**Verdict: 9 PASS / 0 FAIL — Known Issue #22 FIXED**
+
+#### Additional Finding: Known Issue #25
+
+During testing, depth map edges were observed in foreground bokeh (closer than focal plane). Confirmed same artifact in NDK. Root cause is upstream: CoC values computed from raw depth without spatial smoothing, bilateral sampling preserves depth discontinuities. Classified as upstream-originated DEFERRED.
+
 ### Current Status
 
-- **Phase E (macOS Build)**: In progress on `feature/macos-per-arch-build` branch
-  - Environment setup: Complete ✅
-  - Architecture investigation: Complete ✅
-  - CMakeLists.txt modification: Complete ✅
-  - x86_64 build: Success ✅
-  - arm64 build: Success ✅ (cross-compiled from x86_64)
-  - UAT (NUKE macOS x86_64): 9 PASS / 2 FAIL / 1 N/A
-  - **Known Issue #24**: Focus Point XY overlay crash — NUKE macOS only (Flame macOS: PASS) — DEFERRED (host-side issue)
-  - Flame macOS (Intel): Tested — overlay PASS, rendering PASS
+- **Phase 1–11 (OFX Port)**: Complete
+- **Performance Optimization (Stripe Rendering)**: Complete, merged to master
+- **Phase B (OFX Bug Fixes)**: Complete — Filter Preview, log output
+- **Phase C (Abort Callback)**: Complete — coarse abort implemented
+- **Phase D (Stripe Perf Optimize)**: Complete — buffer pre-allocation, stripe height increase, bufWidth cap removal
+- **Phase E (macOS Build)**: Complete — x86_64 and arm64 builds, Known Issue #24 (NUKE macOS overlay) mitigated
+- **Phase E (Coordinate Fix)**: Complete — NDK parity for catseye/barndoors/astigmatism (Known Issue #22 FIXED)
+- **v0.1.10-OFX-v3**: Released (2026-03-23) — Linux + macOS
+
+### OFX-Side Unresolved
+
+| # | Issue | Status | Notes |
+|---|-------|--------|-------|
+| 20 | Memory copy overhead | PARTIALLY MITIGATED | Per-stripe alloc eliminated; full source clone remains (upstream API) |
+
+### Upstream Issues (to report)
+
+| # | Issue | Upstream Impact |
+|---|-------|----------------|
+| 1 | Gamma Correction not connected | Protobuf only, no pipeline |
+| 2 | Focal Plane Offset not connected | NDK knob exists, ConvolveSettings unwired |
+| 3 | Bokeh Noise feature flag disabled | apply_noise() stubbed out |
+| 4 | Axial Aberration enum off-by-one | Protobuf 0,1,2 vs Rust 1,2,3 |
+| 5 | NDK/OFX ~1px pixel drift | Coordinate system difference |
+| 6 | CPU/GPU ~1px pixel drift | Backend difference |
+| 18 | Catseye enable check missing | calculate_catseye() unconditional |
+| 19 | Axial Aberration flag misreference | Checks BARNDOORS_ENABLED |
+| 23 | ChunkHandler vertical seam >4096px | Hardcoded limit=4096 |
+| 25 | Depth map edge in foreground bokeh | No depth smoothing before kernel |
+
+### Next Steps
+
+1. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
+2. **Open test feedback**: Monitor and respond to tester reports
+3. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix
+4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+5. **Depth image caching** (LOW): Flame drag responsiveness improvement
