@@ -98,41 +98,54 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
         env_logger::Env::default().default_filter_or("info")
     ).try_init();
 
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .enable_time()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            log::error!("Failed to create tokio runtime: {e}");
-            return OdResult::ErrorInitFailed;
-        }
-    };
-
-    let mut settings = datamodel::Settings::default();
-    settings.render.use_gpu_if_available = true; // GPU preferred (Phase 1: wgpu independent device)
-
-    let renderer =
-        match runtime.block_on(opendefocus::OpenDefocusRenderer::new(true, &mut settings)) {
-            Ok(r) => r,
+    // Wrap entire initialization in catch_unwind to prevent panics
+    // (e.g. from wgpu device creation) from propagating across the
+    // FFI boundary and crashing the host application.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_time()
+            .build()
+        {
+            Ok(rt) => rt,
             Err(e) => {
-                log::error!("Failed to create OpenDefocus renderer: {e}");
-                return OdResult::ErrorInitFailed;
+                log::error!("Failed to create tokio runtime: {e}");
+                return Err(OdResult::ErrorInitFailed);
             }
         };
 
-    let instance = Box::new(OdInstance {
-        settings,
-        renderer,
-        runtime,
-        gpu_failed: false,
-    });
+        let mut settings = datamodel::Settings::default();
+        settings.render.use_gpu_if_available = true;
 
-    unsafe {
-        *handle_out = Box::into_raw(instance) as *mut c_void;
+        let renderer =
+            match runtime.block_on(opendefocus::OpenDefocusRenderer::new(true, &mut settings)) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("Failed to create OpenDefocus renderer: {e}");
+                    return Err(OdResult::ErrorInitFailed);
+                }
+            };
+
+        Ok(Box::new(OdInstance {
+            settings,
+            renderer,
+            runtime,
+            gpu_failed: false,
+        }))
+    }));
+
+    match result {
+        Ok(Ok(instance)) => {
+            unsafe {
+                *handle_out = Box::into_raw(instance) as *mut c_void;
+            }
+            OdResult::Ok
+        }
+        Ok(Err(e)) => e,
+        Err(_panic) => {
+            log::error!("od_create: caught panic during initialization");
+            OdResult::ErrorInitFailed
+        }
     }
-
-    OdResult::Ok
 }
 
 /// Destroy an OpenDefocus instance and free all resources.

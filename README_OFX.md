@@ -150,6 +150,12 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 | 17 | Render abort (coarse, stripe boundary) | FIXED | Phase C: abort callback implemented. Host `abort()` is checked between stripes via `user_data` callback. NUKE: confirmed working. Flame: N/A (host blocks UI during render, abort() never returns true). NDK polls every 10ms (finer granularity); OFX checks at stripe boundaries only |
 | 20 | Stripe rendering memory copy overhead | PARTIALLY MITIGATED | Phase D: per-stripe heap allocation eliminated (pre-allocated buffer with `copy_from_slice()`), stripe count reduced 50-75%. Full source image clone (~133MB at 4K) still required per render — upstream `render_convolution()` API requires `&mut` ownership, preventing zero-copy. Combined with #16 (fetchImage re-evaluation), Flame remains slower than CPU-only plugins (e.g., Frischluft Lenscare) |
 
+### BMD Fusion Studio: Known Limitations
+
+| # | Issue | Status | Detail |
+|---|-------|--------|--------|
+| 26 | Plugin load error in Fusion Studio (standalone) | INVESTIGATING | DaVinci Resolve loads the plugin successfully, but Fusion Studio (standalone) fails during plugin scan. Root cause is under investigation. DaVinci Resolve and Fusion Studio have different plugin loading mechanisms — Resolve has a robust error-handling sandbox, while Fusion Studio uses a more direct (legacy) memory load process. Panic protection (`catch_unwind`) has been added to the Rust FFI boundary. Host identifier logging added for diagnostics. GPU initialization (wgpu) is deferred to `createInstance` (not during scan). See `references/Fusion Studio OFX エラー原因と対策.md` for detailed analysis |
+
 ### Flame: Known Limitations
 
 | # | Issue | Status | Detail |
