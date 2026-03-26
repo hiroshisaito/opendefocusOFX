@@ -26,6 +26,8 @@ opendefocus-datastructure = { path = "../../upstream/opendefocus/crates/opendefo
 # wgpu panics before they reach the extern "C" boundary (which would abort).
 [profile.release]
 panic = "unwind"
+lto = "thin"
+codegen-units = 1
 
 [build-dependencies]
 cbindgen = "0.28"
