@@ -4,7 +4,7 @@
 
 OpenFX port of [OpenDefocus](https://codeberg.org/gillesvink/opendefocus) — an advanced open-source convolution library for image post-processing.
 
-This project brings the OpenDefocus Rust core to OFX-compatible host applications via an extern "C" FFI bridge. Tested and supported on **NUKE** and **Flame**. Other OFX hosts may work but are untested.
+This project brings the OpenDefocus Rust core to OFX-compatible host applications via an extern "C" FFI bridge. Tested and supported on **NUKE** and **Flame**. DaVinci Resolve loads and operates but is not fully tested (not recommended for production use). Other OFX hosts may work but are untested.
 
 ## Porting Policy
 
@@ -154,7 +154,9 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 
 | # | Issue | Status | Detail |
 |---|-------|--------|--------|
-| 26 | Plugin load error in Fusion Studio (standalone) | DEFERRED | DaVinci Resolve loads the plugin successfully, but Fusion Studio (standalone) rejects the plugin before OFX entry points are called. OpenGL link (`libGL`) fixed for dlopen compatibility. Panic protection (`catch_unwind`) added to Rust FFI boundary. Fusion Studio's plugin scanner appears to use proprietary pre-validation or caching that prevents standard OFX handshake. Not a primary target host |
+| 26 | Plugin load error in Fusion Studio (standalone) — Linux only | DEFERRED | Fusion Studio on **Linux** rejects the plugin before OFX entry points are called. **macOS (Intel) loads successfully.** DaVinci Resolve loads successfully on all platforms. OpenGL link (`libGL`) fixed for dlopen compatibility. Panic protection (`catch_unwind`) added to Rust FFI boundary. Linux-specific root cause under investigation (scanner cache or proprietary pre-validation). Not a primary target host |
+
+**BMD Fusion / DaVinci Resolve is not recommended for production use.** UAT has not been completed for these hosts, and performance characteristics (GPU/CPU rendering speed, GUI responsiveness) have not been validated. Use NUKE or Flame for production workflows.
 
 ### Flame: Known Limitations
 

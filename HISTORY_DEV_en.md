@@ -2000,10 +2000,12 @@ Investigated BMD Fusion Studio (standalone) plugin load failure. DaVinci Resolve
 
 **Findings:**
 - Plugin binary was missing explicit `libGL` link on Linux — `glTranslated` (OpenGL overlay) caused `undefined symbol` at dlopen. **Fixed** by adding `find_package(OpenGL)` to CMakeLists.txt
-- After fixing dlopen, Fusion Studio still rejects the plugin before calling `OfxGetNumberOfPlugins`. The OFX entry points are never reached (confirmed via file-based diagnostic logging)
+- After fixing dlopen, Fusion Studio on Linux still rejects the plugin before calling `OfxGetNumberOfPlugins`. The OFX entry points are never reached (confirmed via file-based diagnostic logging)
 - `catch_unwind` added to `od_create()` for FFI panic protection (useful for all hosts)
-- Root cause likely: Fusion Studio plugin scanner cache or proprietary pre-validation that rejects the binary before standard OFX handshake
-- **Status: DEFERRED** — classified as Known Issue #26. Fusion Studio is not a primary target host
+- Root cause likely: Fusion Studio Linux plugin scanner cache or proprietary pre-validation that rejects the binary before standard OFX handshake
+- **macOS (Intel): Fusion Studio loads the plugin successfully** — issue is Linux-specific
+- **DaVinci Resolve**: Loads successfully on all platforms
+- **Status: DEFERRED** — classified as Known Issue #26. Fusion / DaVinci Resolve is not a primary target host; UAT not completed, performance not validated. Not recommended for production use
 
 ### Current Status
 
