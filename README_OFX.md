@@ -1,6 +1,6 @@
 # OpenDefocus OFX
 
-**Version: v0.1.10-OFX-v3**
+**Version: v0.1.10-OFX-v4-dev**
 
 OpenFX port of [OpenDefocus](https://codeberg.org/gillesvink/opendefocus) — an advanced open-source convolution library for image post-processing.
 
@@ -154,7 +154,7 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 
 | # | Issue | Status | Detail |
 |---|-------|--------|--------|
-| 26 | Plugin load error in Fusion Studio (standalone) | INVESTIGATING | DaVinci Resolve loads the plugin successfully, but Fusion Studio (standalone) fails during plugin scan. Root cause is under investigation. DaVinci Resolve and Fusion Studio have different plugin loading mechanisms — Resolve has a robust error-handling sandbox, while Fusion Studio uses a more direct (legacy) memory load process. Panic protection (`catch_unwind`) has been added to the Rust FFI boundary. Host identifier logging added for diagnostics. GPU initialization (wgpu) is deferred to `createInstance` (not during scan). See `references/Fusion Studio OFX エラー原因と対策.md` for detailed analysis |
+| 26 | Plugin load error in Fusion Studio (standalone) | DEFERRED | DaVinci Resolve loads the plugin successfully, but Fusion Studio (standalone) rejects the plugin before OFX entry points are called. OpenGL link (`libGL`) fixed for dlopen compatibility. Panic protection (`catch_unwind`) added to Rust FFI boundary. Fusion Studio's plugin scanner appears to use proprietary pre-validation or caching that prevents standard OFX handshake. Not a primary target host |
 
 ### Flame: Known Limitations
 

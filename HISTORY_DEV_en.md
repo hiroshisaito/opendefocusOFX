@@ -1994,10 +1994,30 @@ Code review identified two performance/correctness issues unrelated to the coord
 | 23 | ChunkHandler vertical seam >4096px | Hardcoded limit=4096, splits horizontally, chunk boundary produces visible seam |
 | 25 | Depth map edge in foreground bokeh | No depth smoothing before kernel; bilateral sampling preserves discontinuities |
 
+### 2026-03-26: Fusion Studio Compatibility Investigation (Known Issue #26)
+
+Investigated BMD Fusion Studio (standalone) plugin load failure. DaVinci Resolve loads successfully.
+
+**Findings:**
+- Plugin binary was missing explicit `libGL` link on Linux — `glTranslated` (OpenGL overlay) caused `undefined symbol` at dlopen. **Fixed** by adding `find_package(OpenGL)` to CMakeLists.txt
+- After fixing dlopen, Fusion Studio still rejects the plugin before calling `OfxGetNumberOfPlugins`. The OFX entry points are never reached (confirmed via file-based diagnostic logging)
+- `catch_unwind` added to `od_create()` for FFI panic protection (useful for all hosts)
+- Root cause likely: Fusion Studio plugin scanner cache or proprietary pre-validation that rejects the binary before standard OFX handshake
+- **Status: DEFERRED** — classified as Known Issue #26. Fusion Studio is not a primary target host
+
+### Current Status
+
+- **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
+- **Performance Optimization (Stripe Rendering)**: Phase D complete, merged to master
+- **Abort Callback**: Phase C complete, merged to master
+- **Coordinate Fix**: Phase E complete, merged to master
+- **macOS Support**: Complete, v0.1.10-OFX-v3 released (Linux + macOS)
+- **Fusion Studio**: Load failure under investigation, DEFERRED (Known Issue #26)
+
 ### Next Steps
 
-1. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
-2. **Open test feedback**: Monitor and respond to tester reports
-3. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes (Depth fetch guard, RoI X overscan removal), comment cleanup
+1. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes, OpenGL link fix, Fusion Studio panic protection
+2. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
+3. **Open test feedback**: Monitor and respond to tester reports
 4. **Windows build support**: Build environment setup pending
 5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation

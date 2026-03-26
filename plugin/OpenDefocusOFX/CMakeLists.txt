@@ -119,9 +119,14 @@ if(APPLE)
         ${COREFOUNDATION_FRAMEWORK}
         ${OBJC_LIB})
 else()
+    # OpenGL required for Focus Point XY overlay (glTranslated, glBegin, etc.)
+    # Without explicit linking, dlopen fails in hosts that don't pre-load libGL
+    # (e.g. Fusion Studio scan phase), causing "undefined symbol: glTranslated".
+    find_package(OpenGL REQUIRED)
     target_link_libraries(OpenDefocus PRIVATE
         OfxSupport
         ${RUST_STATICLIB}
+        OpenGL::GL
         pthread
         dl
         m)

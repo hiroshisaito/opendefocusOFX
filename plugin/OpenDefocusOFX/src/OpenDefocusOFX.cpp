@@ -1287,19 +1287,9 @@ public:
 };
 
 void OpenDefocusPluginFactory::describe(OFX::ImageEffectDescriptor& desc) {
-    // Log host identifier for diagnostics (helps debug host-specific issues
-    // such as Fusion Studio load failures)
-    auto* hostProps = desc.getPropertySet().propSetHandle();
-    if (hostProps) {
-        try {
-            std::string hostName = desc.getPropertySet().propGetString("OfxPropName", false);
-            std::string hostLabel = desc.getPropertySet().propGetString("OfxPropLabel", false);
-            fprintf(stderr, "[OpenDefocusOFX] Host: %s (%s), Plugin: %s\n",
-                    hostName.c_str(), hostLabel.c_str(), kDevVersion);
-        } catch (...) {
-            fprintf(stderr, "[OpenDefocusOFX] Plugin: %s (host info unavailable)\n", kDevVersion);
-        }
-    }
+    // Log host and plugin version for diagnostics
+    fprintf(stderr, "[OpenDefocusOFX] describe(), plugin: %s\n", kDevVersion);
+    fflush(stderr);
 
     desc.setLabels(kPluginName, kPluginName, kPluginName);
     desc.setPluginGrouping(kPluginGrouping);
