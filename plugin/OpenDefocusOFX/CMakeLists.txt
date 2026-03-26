@@ -58,13 +58,29 @@ set(RUST_STATICLIB "${RUST_LIB_DIR}/libopendefocus_ofx_bridge.a")
 # so this is a no-op when sources haven't changed.  This avoids the problem
 # where CMake's OUTPUT-based dependency tracking doesn't see Rust source
 # changes (the .a already exists) and silently skips recompilation.
-add_custom_target(rust_bridge ALL
-    COMMAND ${CMAKE_COMMAND} -E env
-        PATH=$ENV{HOME}/.cargo/bin:$ENV{PATH}
-        cargo build ${CARGO_BUILD_FLAG} ${CARGO_TARGET_FLAG}
-    WORKING_DIRECTORY "${RUST_BRIDGE_DIR}"
-    COMMENT "Building Rust opendefocus-ofx-bridge staticlib"
-    VERBATIM)
+if(WIN32)
+    # Windows (MinGW): set PROTOC to system protoc (protobuf-vendored not used),
+    # and pass -Wa,-mbig-obj to handle large COFF sections in protobuf-src.
+    find_program(PROTOC_EXECUTABLE protoc REQUIRED)
+    add_custom_target(rust_bridge ALL
+        COMMAND ${CMAKE_COMMAND} -E env
+            "PATH=$ENV{USERPROFILE}/.cargo/bin;$ENV{PATH}"
+            "PROTOC=${PROTOC_EXECUTABLE}"
+            "CFLAGS=-Wa,-mbig-obj"
+            "CXXFLAGS=-Wa,-mbig-obj"
+            cargo build ${CARGO_BUILD_FLAG} ${CARGO_TARGET_FLAG}
+        WORKING_DIRECTORY "${RUST_BRIDGE_DIR}"
+        COMMENT "Building Rust opendefocus-ofx-bridge staticlib"
+        VERBATIM)
+else()
+    add_custom_target(rust_bridge ALL
+        COMMAND ${CMAKE_COMMAND} -E env
+            PATH=$ENV{HOME}/.cargo/bin:$ENV{PATH}
+            cargo build ${CARGO_BUILD_FLAG} ${CARGO_TARGET_FLAG}
+        WORKING_DIRECTORY "${RUST_BRIDGE_DIR}"
+        COMMENT "Building Rust opendefocus-ofx-bridge staticlib"
+        VERBATIM)
+endif()
 
 # --- OFX Support Library (static) ---
 file(GLOB OFX_SUPPORT_SOURCES "${OFX_SUPPORT_LIBRARY_DIR}/*.cpp")
@@ -118,6 +134,28 @@ if(APPLE)
         ${QUARTZCORE_FRAMEWORK}
         ${COREFOUNDATION_FRAMEWORK}
         ${OBJC_LIB})
+elseif(WIN32)
+    # Windows (MinGW): Rust wgpu uses D3D12/Vulkan backends.
+    # System libraries required by Rust std + wgpu on Windows.
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(OpenDefocus PRIVATE
+        OfxSupport
+        ${RUST_STATICLIB}
+        OpenGL::GL
+        ws2_32
+        userenv
+        bcrypt
+        ntdll
+        d3dcompiler
+        d3d12
+        dxgi
+        dxguid
+        setupapi
+        cfgmgr32
+        advapi32
+        ole32
+        oleaut32
+        uuid)
 else()
     # OpenGL required for Focus Point XY overlay (glTranslated, glBegin, etc.)
     # Without explicit linking, dlopen fails in hosts that don't pre-load libGL
@@ -139,6 +177,8 @@ if(APPLE)
     else()
         set(ARCHDIR "MacOS")
     endif()
+elseif(WIN32)
+    set(ARCHDIR "Win64")
 else()
     set(ARCHDIR "Linux-x86-64")
 endif()

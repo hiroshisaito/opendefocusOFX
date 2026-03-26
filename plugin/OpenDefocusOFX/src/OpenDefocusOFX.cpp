@@ -16,6 +16,13 @@
 #endif
 #include <cmath>
 
+// Windows API headers define macros that conflict with FFI bridge enum names.
+#ifdef _WIN32
+#undef ERROR_INVALID_HANDLE
+#undef ERROR_NULL_POINTER
+#undef OK
+#endif
+
 extern "C" {
 #include "opendefocus_ofx_bridge.h"
 }
@@ -1310,10 +1317,11 @@ void OpenDefocusPluginFactory::describe(OFX::ImageEffectDescriptor& desc) {
     desc.setSupportsTiles(false); // Full image per render call (no tiling yet)
     desc.setTemporalClipAccess(false);
 
-    // Thread safety: unsafe — rustHandle_ holds mutable state (params + renderer),
-    // so concurrent render() on the same instance would cause race conditions.
-    // Host will serialize render calls or create separate instances per thread.
-    desc.setRenderThreadSafety(OFX::eRenderUnsafe);
+    // Thread safety: instance-safe — each plugin instance owns its own rustHandle_
+    // (Rust renderer + mutable settings), so different instances can render in
+    // parallel safely.  The host must serialize render() calls on the *same*
+    // instance, which OFX guarantees for eRenderInstanceSafe.
+    desc.setRenderThreadSafety(OFX::eRenderInstanceSafe);
 
     // OpenGL overlay for Focus Point XY crosshair
     desc.setOverlayInteractDescriptor(new OpenDefocusOverlayDescriptor);

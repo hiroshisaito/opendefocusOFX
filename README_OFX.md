@@ -4,7 +4,7 @@
 
 OpenFX port of [OpenDefocus](https://codeberg.org/gillesvink/opendefocus) — an advanced open-source convolution library for image post-processing.
 
-This project brings the OpenDefocus Rust core to OFX-compatible host applications via an extern "C" FFI bridge. Tested and supported on **NUKE** and **Flame**. Other OFX hosts may work but are untested.
+This project brings the OpenDefocus Rust core to OFX-compatible host applications via an extern "C" FFI bridge. Tested and supported on **NUKE** and **Flame**. DaVinci Resolve loads and operates but is not fully tested (not recommended for production use). Other OFX hosts may work but are untested.
 
 ## Porting Policy
 
@@ -33,10 +33,11 @@ In the NDK version, NUKE's host engine splits the image into horizontal stripes 
 ### Prerequisites
 
 - **CMake** 3.20+
-- **C++17** compiler (GCC 8+ on Linux / Apple Clang 14+ on macOS)
+- **C++17** compiler (GCC 8+ on Linux / Apple Clang 14+ on macOS / MinGW-W64 GCC 13+ on Windows)
 - **Rust** stable (1.92+) and the nightly toolchain listed in `upstream/opendefocus/crates/spirv-cli-build/rust-toolchain.toml`
 - **OpenFX SDK** — included as a git submodule (`upstream/openfx/`)
 - **OpenDefocus** — included as a git submodule (`upstream/opendefocus/`)
+- **Windows only**: System `protoc` (e.g. `winget install Google.Protobuf`), Rust GNU toolchain (`stable-x86_64-pc-windows-gnu`)
 
 ### Dependencies
 
@@ -62,6 +63,14 @@ cmake ../plugin/OpenDefocusOFX -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
+#### Windows (MinGW)
+
+```bash
+mkdir -p build && cd build
+cmake ../plugin/OpenDefocusOFX -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+mingw32-make -j%NUMBER_OF_PROCESSORS%
+```
+
 The built plugin is automatically copied to the bundle directory:
 ```
 # Linux
@@ -70,6 +79,8 @@ bundle/OpenDefocusOFX.ofx.bundle/Contents/Linux-x86-64/OpenDefocusOFX.ofx
 bundle/OpenDefocusOFX.ofx.bundle/Contents/MacOS-x86-64/OpenDefocusOFX.ofx
 # macOS (Apple Silicon)
 bundle/OpenDefocusOFX.ofx.bundle/Contents/MacOS/OpenDefocusOFX.ofx
+# Windows
+bundle/OpenDefocusOFX.ofx.bundle/Contents/Win64/OpenDefocusOFX.ofx
 ```
 
 ### Installation
@@ -83,7 +94,10 @@ sudo cp -r bundle/OpenDefocusOFX.ofx.bundle /usr/OFX/Plugins/
 # macOS (system-wide)
 sudo cp -r bundle/OpenDefocusOFX.ofx.bundle /Library/OFX/Plugins/
 
-# Or set OFX_PLUGIN_PATH (both platforms)
+# Windows
+xcopy /E /I bundle\OpenDefocusOFX.ofx.bundle "C:\Program Files\Common Files\OFX\Plugins\OpenDefocusOFX.ofx.bundle"
+
+# Or set OFX_PLUGIN_PATH (all platforms)
 export OFX_PLUGIN_PATH=/path/to/bundle/parent
 ```
 
@@ -91,11 +105,11 @@ export OFX_PLUGIN_PATH=/path/to/bundle/parent
 
 | Aspect | NDK Version | OFX Version |
 |--------|------------|-------------|
-| Host | NUKE only | Tested: NUKE, Flame (other OFX hosts may work but are untested) |
+| Host | NUKE only | Tested: NUKE, Flame. Loads in DaVinci Resolve / Fusion Studio (not fully tested) |
 | Language | Rust + C++ (CXX FFI) | Rust + C++ (extern "C" FFI) |
 | Stripe splitting | NUKE host provides stripes | Plugin-internal stripe loop in `od_render()` |
 | Camera Mode | Supported (NUKE camera data) | Omitted (host-dependent) |
-| GPU acceleration | Vulkan/Metal via wgpu | Same (Vulkan/Metal via wgpu) |
+| GPU acceleration | Vulkan/Metal via wgpu | Same (Vulkan/Metal/DX12 via wgpu) |
 | Build system | `cargo xtask` | CMake + cargo |
 | Parameter UI | NUKE knobs | OFX parameter API |
 
@@ -154,7 +168,9 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 
 | # | Issue | Status | Detail |
 |---|-------|--------|--------|
-| 26 | Plugin load error in Fusion Studio (standalone) | DEFERRED | DaVinci Resolve loads the plugin successfully, but Fusion Studio (standalone) rejects the plugin before OFX entry points are called. OpenGL link (`libGL`) fixed for dlopen compatibility. Panic protection (`catch_unwind`) added to Rust FFI boundary. Fusion Studio's plugin scanner appears to use proprietary pre-validation or caching that prevents standard OFX handshake. Not a primary target host |
+| 26 | Plugin load error in Fusion Studio (standalone) — Linux only | DEFERRED | Fusion Studio on **Linux** rejects the plugin before OFX entry points are called. **macOS (Intel) loads successfully.** DaVinci Resolve loads successfully on all platforms. OpenGL link (`libGL`) fixed for dlopen compatibility. Panic protection (`catch_unwind`) added to Rust FFI boundary. Linux-specific root cause under investigation (scanner cache or proprietary pre-validation). Not a primary target host |
+
+**BMD Fusion / DaVinci Resolve is not recommended for production use.** UAT has not been completed for these hosts, and performance characteristics (GPU/CPU rendering speed, GUI responsiveness) have not been validated. Use NUKE or Flame for production workflows.
 
 ### Flame: Known Limitations
 
