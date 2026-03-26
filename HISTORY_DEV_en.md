@@ -2007,6 +2007,60 @@ Investigated BMD Fusion Studio (standalone) plugin load failure. DaVinci Resolve
 - **DaVinci Resolve**: Loads successfully on all platforms
 - **Status: DEFERRED** — classified as Known Issue #26. Fusion / DaVinci Resolve is not a primary target host; UAT not completed, performance not validated. Not recommended for production use
 
+### 2026-03-26: Windows (MinGW) Build Support & Thread Safety Fix
+
+Added Windows build support using MinGW/GNU toolchain and fixed Fusion Studio thread safety warning.
+
+#### Windows Build Support
+
+**Problem:** The project was Linux/macOS only. CMakeLists.txt had no Windows branches, and the Rust `protobuf-vendored` feature failed under MinGW (COFF "too many sections" error in protobuf-src, and vendored protoc binary failed to execute).
+
+**Solution (3 files changed):**
+
+1. **`rust/opendefocus-ofx-bridge/Cargo.toml`** — Removed `protobuf-vendored` feature on Windows via `[target.'cfg(not(windows))'.dependencies]`. Windows uses system `protoc` (installed via winget); Linux/macOS continue to use vendored protoc unchanged.
+
+2. **`plugin/OpenDefocusOFX/CMakeLists.txt`** — Added `WIN32` branches:
+   - **cargo env**: Sets `PROTOC` path, `CFLAGS=-Wa,-mbig-obj` / `CXXFLAGS=-Wa,-mbig-obj` (MinGW big-obj support), Windows-style PATH separator
+   - **Link libraries**: Rust std + wgpu Windows dependencies (`ws2_32`, `userenv`, `bcrypt`, `ntdll`, `d3dcompiler`, `d3d12`, `dxgi`, `dxguid`, `setupapi`, `cfgmgr32`, `advapi32`, `ole32`, `oleaut32`, `uuid`, `OpenGL::GL`)
+   - **Bundle directory**: `Win64` architecture directory
+
+3. **`plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`** — Added `#undef` for Windows API macros (`ERROR_INVALID_HANDLE`, `ERROR_NULL_POINTER`, `OK`) that conflict with FFI bridge `OdResult` enum names. Guarded by `#ifdef _WIN32`.
+
+**Windows build environment requirements:**
+- MinGW-W64 GCC (tested: 13.2.0 from Strawberry Perl)
+- Rust `stable-x86_64-pc-windows-gnu` (default toolchain must be GNU, not MSVC)
+- Rust `nightly-2025-06-30-x86_64-pc-windows-gnu` with `rust-src`, `rustc-dev`, `llvm-tools`
+- System `protoc` (e.g. `winget install Google.Protobuf`)
+- CMake with MinGW Makefiles generator
+
+**Build command:**
+```bash
+mkdir -p build && cd build
+cmake ../plugin/OpenDefocusOFX -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+mingw32-make -j$(nproc)
+```
+
+**Impact on Linux/macOS:** None. All Windows-specific changes are guarded by `WIN32` / `_WIN32` / `cfg(windows)`. Existing Linux/macOS build paths are unchanged.
+
+#### Thread Safety Fix (Fusion Studio)
+
+**Problem:** Fusion Studio console displayed:
+```
+Warning: OFX Plugin OpenDefocusOFX reports thread safety of OfxImageEffectRenderUnsafe.
+This is not supported in Fusion, and use of this plugin may result in instability.
+```
+
+**Root cause:** Plugin declared `eRenderUnsafe`, which Fusion does not support. This declaration was overly conservative — each plugin instance owns its own independent `rustHandle_` (Rust renderer + mutable settings), so instance-level parallelism is safe.
+
+**Fix:** Changed `setRenderThreadSafety(OFX::eRenderUnsafe)` → `setRenderThreadSafety(OFX::eRenderInstanceSafe)`.
+
+- `eRenderInstanceSafe`: Different instances can render in parallel; host serializes calls on the same instance
+- This matches the actual implementation (per-instance `rustHandle_` ownership)
+- Resolves Fusion Studio warning
+- NUKE/Flame: may see improved parallelism (previously unnecessarily serialized by Unsafe declaration)
+
+**Impact on Linux/macOS:** Positive — the same code change applies to all platforms, providing a more accurate thread safety declaration.
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
@@ -2014,12 +2068,14 @@ Investigated BMD Fusion Studio (standalone) plugin load failure. DaVinci Resolve
 - **Abort Callback**: Phase C complete, merged to master
 - **Coordinate Fix**: Phase E complete, merged to master
 - **macOS Support**: Complete, v0.1.10-OFX-v3 released (Linux + macOS)
-- **Fusion Studio**: Load failure under investigation, DEFERRED (Known Issue #26)
+- **Windows Support**: Build support added (MinGW), plugin builds and loads in Fusion Studio
+- **Fusion Studio**: Load failure on Linux DEFERRED (Known Issue #26); thread safety warning fixed; Windows loads successfully
+- **Thread Safety**: Upgraded from eRenderUnsafe to eRenderInstanceSafe (all platforms)
 
 ### Next Steps
 
-1. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes, OpenGL link fix, Fusion Studio panic protection
+1. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes, OpenGL link fix, Fusion Studio panic protection, Windows build support, thread safety fix
 2. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
 3. **Open test feedback**: Monitor and respond to tester reports
-4. **Windows build support**: Build environment setup pending
+4. **Windows UAT**: Run UAT checklist on Windows (Fusion Studio / DaVinci Resolve)
 5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
