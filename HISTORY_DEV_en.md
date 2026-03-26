@@ -20,7 +20,7 @@ The ported version receives a `-OFX-v<revision>` suffix.
 - When only the OFX side is modified for the same original version, the revision is incremented
   - Example: OFX-side bug fix → `v0.1.10-OFX-v2`
 
-Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v1** (in development)
+Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v4-dev**
 
 ## Directory Structure
 
