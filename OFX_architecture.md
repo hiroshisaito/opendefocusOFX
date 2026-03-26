@@ -2,15 +2,18 @@
 
 This document summarizes the current OFX integration as implemented in the C++ plugin, the Rust FFI bridge, and the upstream OpenDefocus core.
 
+It reflects the current `master` implementation after Phase E coordinate-system fixes and the 2026-03-25 review fixes (Depth fetch guard and RoI X overscan removal), not just the `v0.1.10-OFX-v3` release snapshot.
+
 ## 1. Project Architecture
 
 ```mermaid
 flowchart LR
-  Host["OFX Host<br/>Nuke / Flame / Resolve<br/>OFX actions and clip scheduling"]
+  Host["OFX Host<br/>tested: NUKE / Flame<br/>other hosts untested<br/>descriptor queries, instance creation, render actions"]
 
   subgraph CPP["C++ Plugin Layer"]
-    CPP1["OpenDefocusPlugin<br/>describe(), changedParam(), render()"]
-    CPP2["Fetch OFX clips and params<br/>build fetchWindow and host-side buffers<br/>copy final pixels back to dst"]
+    CPP0["Factory / descriptor<br/>describe(), describeInContext()<br/>declare contexts, clips, params, overlay"]
+    CPP1["OpenDefocusPlugin constructor<br/>fetch OFX clips and params<br/>call od_create() eagerly"]
+    CPP2["render(), changedParam(), RoI, clip preferences<br/>build fetchWindow and host-side buffers<br/>copy final pixels back to dst"]
   end
 
   subgraph FFI["FFI Boundary"]
@@ -18,6 +21,7 @@ flowchart LR
   end
 
   subgraph Bridge["Rust Bridge Layer"]
+    RB0["od_create()<br/>init logging + tokio runtime<br/>create GPU-preferred renderer eagerly"]
     RB1["OdInstance<br/>settings + renderer + tokio runtime + gpu_failed"]
     RB2["od_set_* setters<br/>od_set_use_gpu()<br/>od_render() stripe orchestration"]
   end
@@ -34,7 +38,9 @@ flowchart LR
     Kernel["Shared kernel logic<br/>opendefocus-kernel + opendefocus_shared"]
   end
 
-  Host --> CPP1 --> CPP2 --> FFI1 --> RB1 --> RB2 --> RC1 --> RC2 --> SR
+  Host --> CPP0 --> CPP1 --> FFI1 --> RB0 --> RB1
+  CPP1 -.stores OdHandle for later renders.-> CPP2
+  Host --> CPP2 --> FFI1 --> RB2 --> RC1 --> RC2 --> SR
   SR --> GPU
   SR --> CPU
   GPU --> Kernel
@@ -52,7 +58,24 @@ Relevant files:
 - `upstream/opendefocus/crates/opendefocus/src/runners/cpu.rs`
 - `upstream/opendefocus/crates/opendefocus/src/runners/wgpu.rs`
 
-## 2. Rendering Pipeline
+## 2. Host, Context, and Initialization Behavior
+
+- Tested and supported hosts are **NUKE** and **Flame**. Other OFX hosts are currently untested.
+- `describeInContext()` branches the parameter layout by `hostName`: NUKE uses one topology, Flame uses another. This is a UI/layout branch, not a render backend branch.
+- The descriptor currently advertises both `eContextGeneral` and `eContextFilter`.
+- `Source` and `Output` clips are defined in all contexts. `Depth` and `Filter` clips are defined only in `eContextGeneral`.
+- The plugin constructor currently calls `fetchClip()` for `Source`, `Depth`, `Filter`, and `Output` unconditionally, then calls `od_create()` immediately.
+- `od_create()` eagerly initializes Rust logging, creates a Tokio runtime, and creates a GPU-preferred `OpenDefocusRenderer` before the first render.
+- This eager initialization path and the partial `eContextFilter` contract are architecturally important when debugging host startup or plugin-load failures on stricter OFX hosts.
+
+Relevant files:
+
+- `plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`
+- `rust/opendefocus-ofx-bridge/src/lib.rs`
+- `README_OFX.md`
+- `HISTORY_DEV_en.md`
+
+## 3. Rendering Pipeline
 
 ```mermaid
 flowchart TD
@@ -61,16 +84,16 @@ flowchart TD
   E["Throw OFX error or return"]
   I{"No Rust handle or Size <= 0?"}
   Pass["Memcpy src -> dst<br/>pass-through"]
-  P["Read OFX params<br/>apply renderScale<br/>od_set_use_gpu() + od_set_*"]
+  P["Read OFX params<br/>apply renderScale.x<br/>od_set_use_gpu() + od_set_*"]
   Prev{"Filter preview path?"}
   PrevBuf["Build previewBuf<br/>force 2D + preview resolution"]
-  Build["Compute fetchWindow<br/>expand Y by blur margin<br/>use full buffer width"]
+  Build["Compute fetchWindow<br/>expand Y by blur margin only<br/>use full buffer width"]
   Src["Copy source into imageBuffer<br/>ClampToEdge padding"]
-  Dep{"Depth mode and depth clip?"}
+  Dep{"Mode = Depth and depth clip connected?"}
   DepBuf["Copy depth into depthBuffer<br/>ClampToEdge padding"]
   Fil{"Filter Type = Image and filter clip connected?"}
   FilBuf["Copy filter clip into filterBuffer"]
-  Geo["Set focus plane and defocus mode<br/>set resolution, center, fullRegion, renderRegion"]
+  Geo["Get source RoD<br/>set focus plane and defocus mode<br/>set resolution, center (RoD-local)<br/>set fullRegion/renderRegion (RoD-based)"]
   Call["Call od_render()<br/>with previewBuf or imageBuffer"]
 
   subgraph Bridge["Rust FFI Bridge: od_render()"]
@@ -81,7 +104,7 @@ flowchart TD
     R3["Clone source_image snapshot<br/>pre-allocate reusable stripe_buf"]
     R4{"More stripes in render_region?"}
     R4A{"Abort requested?<br/>global flag or host callback"}
-    R5["Reuse stripe_buf and stripe_depth<br/>compute y_in/y_out and stripe_specs"]
+    R5["Reuse stripe_buf and stripe_depth<br/>compute y_in/y_out and stripe_specs<br/>full_region.y = absolute stripe Y"]
     R6{"First GPU stripe?"}
     R7["render_stripe() inside catch_unwind"]
     R8{"GPU stripe succeeded?"}
@@ -162,10 +185,19 @@ Relevant files:
 - `upstream/opendefocus/crates/opendefocus/src/runners/cpu.rs`
 - `upstream/opendefocus/crates/opendefocus/src/runners/wgpu.rs`
 
-## 3. Current Behavior Notes
+## 4. Current Behavior Notes
 
+- Tested hosts are NUKE and Flame. Resolve and Fusion are not part of the validated host matrix for this port.
+- `describeInContext()` performs host-specific UI topology branching via `OFX::getImageEffectHostDescription()->hostName`.
+- The plugin advertises `eContextGeneral` and `eContextFilter`, but `Depth` and `Filter` clips are only declared in `eContextGeneral`.
+- The constructor still fetches `Depth` and `Filter` clips unconditionally and calls `od_create()` eagerly. This is a current compatibility risk for hosts that instantiate or validate plugins strictly during startup scan.
+- `od_create()` eagerly creates the Tokio runtime and a GPU-preferred renderer. GPU backend creation is therefore not deferred until first render.
 - C++ no longer caps `bufWidth` to `4096`. The full `fetchWindow` width is used, and stripe splitting keeps each stripe buffer under the wgpu storage-buffer limit.
 - Rust still uses the upstream `ChunkHandler(limit = 4096)` inside `RenderEngine`, so images wider than `4096px` can still hit the upstream horizontal chunk path and its known seam issue.
+- `render()` fetches `Depth` only in Depth mode. `getRegionsOfInterest()` also requests `Depth` only in Depth mode, avoiding unnecessary upstream evaluation in 2D mode and Filter Preview.
+- RoI expands only in Y. X overscan is not requested because the render buffer uses render-window width and edge sampling is handled by ClampToEdge behavior.
+- Geometry passed to Rust is RoD-based: `resolution` comes from source RoD, `center` is RoD-local, and stripe `full_region.y` carries absolute Y for position-dependent effects.
+- The implementation uses `renderScale.x` only and assumes uniform render scale.
 - Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback. If abort is detected, Rust returns `ABORTED`, C++ restores pristine source pixels into `imageBuffer`, and the normal overscan-safe dst copy path writes an unprocessed frame.
 - Filter Preview is only enabled for `Disc` and `Blade`. In Rust, preview renders use full-height stripe size to bypass stripe splitting and avoid preview seams.
 - Phase D reduced stripe overhead by reusing a pre-allocated `stripe_buf`, but each render still clones the full source image once because the upstream render API requires mutable ownership of the working image buffer.
