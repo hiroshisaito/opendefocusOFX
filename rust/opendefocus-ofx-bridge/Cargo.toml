@@ -8,12 +8,19 @@ name = "opendefocus_ofx_bridge"
 crate-type = ["staticlib"]
 
 [dependencies]
-opendefocus = { path = "../../upstream/opendefocus/crates/opendefocus", default-features = false, features = ["std", "protobuf-vendored", "wgpu"] }
-opendefocus-datastructure = { path = "../../upstream/opendefocus/crates/opendefocus-datastructure", default-features = false, features = ["std", "protobuf-vendored"] }
+opendefocus = { path = "../../upstream/opendefocus/crates/opendefocus", default-features = false, features = ["std", "wgpu"] }
+opendefocus-datastructure = { path = "../../upstream/opendefocus/crates/opendefocus-datastructure", default-features = false, features = ["std"] }
 ndarray = "0.16"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 log = "0.4"
 env_logger = "0.11"
+
+# On non-Windows, use vendored protoc (protobuf-src) so no system protoc is needed.
+# On Windows (MinGW), protobuf-src fails to build, so system protoc is used instead
+# (set PROTOC env var or ensure protoc is in PATH).
+[target.'cfg(not(windows))'.dependencies]
+opendefocus = { path = "../../upstream/opendefocus/crates/opendefocus", default-features = false, features = ["protobuf-vendored"] }
+opendefocus-datastructure = { path = "../../upstream/opendefocus/crates/opendefocus-datastructure", default-features = false, features = ["protobuf-vendored"] }
 
 # Ensure panic=unwind so that std::panic::catch_unwind can intercept
 # wgpu panics before they reach the extern "C" boundary (which would abort).
