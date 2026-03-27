@@ -18,11 +18,7 @@ compile_commands.json
 # OFX bundle (built binary)
 bundle/
 
-<<<<<<< Updated upstream
 # Release artifacts
-=======
-# Release tarballs
->>>>>>> Stashed changes
 release/
 
 # Plugin build artifacts
