@@ -41,7 +41,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v4-dev (Review Fixes)";
+static const char* kDevVersion = "v0.1.10-OFX-v4-dev (P0 Stability Fixes)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
