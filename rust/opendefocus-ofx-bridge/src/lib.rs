@@ -73,12 +73,39 @@ pub enum OdResultMode {
 
 struct OdInstance {
     settings: datamodel::Settings,
-    renderer: opendefocus::OpenDefocusRenderer,
+    /// Lazy-initialized renderer.  `None` until the first render or
+    /// explicit `od_set_use_gpu()` call.  This keeps `od_create()` fast
+    /// (no wgpu device probe at node-creation time).
+    renderer: Option<opendefocus::OpenDefocusRenderer>,
     runtime: tokio::runtime::Runtime,
     gpu_failed: bool,
     /// Per-instance abort flag.  Avoids cross-instance interference when
     /// multiple instances render in parallel (eRenderInstanceSafe).
     aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl OdInstance {
+    /// Ensure the renderer is initialised, creating it on demand.
+    /// Returns a mutable reference to the renderer.
+    fn ensure_renderer(&mut self) -> Result<&mut opendefocus::OpenDefocusRenderer, OdResult> {
+        if self.renderer.is_none() {
+            log::info!("Lazy-initializing renderer (GPU={})", self.settings.render.use_gpu_if_available);
+            match self.runtime.block_on(opendefocus::OpenDefocusRenderer::new(
+                self.settings.render.use_gpu_if_available,
+                &mut self.settings,
+            )) {
+                Ok(r) => {
+                    log::info!("Renderer created: {}", if r.is_gpu() { "GPU" } else { "CPU" });
+                    self.renderer = Some(r);
+                }
+                Err(e) => {
+                    log::error!("Failed to create renderer: {e}");
+                    return Err(OdResult::ErrorInitFailed);
+                }
+            }
+        }
+        Ok(self.renderer.as_mut().unwrap())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -101,11 +128,14 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
         env_logger::Env::default().default_filter_or("info")
     ).try_init();
 
-    // Wrap entire initialization in catch_unwind to prevent panics
-    // (e.g. from wgpu device creation) from propagating across the
-    // FFI boundary and crashing the host application.
+    // Wrap initialization in catch_unwind to prevent panics from
+    // propagating across the FFI boundary and crashing the host.
+    //
+    // Lazy init: only create the tokio runtime and default settings here.
+    // The renderer (wgpu device probe) is deferred to the first render
+    // or od_set_use_gpu() call, keeping node creation fast.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let runtime = match tokio::runtime::Builder::new_multi_thread()
+        let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
         {
@@ -119,18 +149,9 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
         let mut settings = datamodel::Settings::default();
         settings.render.use_gpu_if_available = true;
 
-        let renderer =
-            match runtime.block_on(opendefocus::OpenDefocusRenderer::new(true, &mut settings)) {
-                Ok(r) => r,
-                Err(e) => {
-                    log::error!("Failed to create OpenDefocus renderer: {e}");
-                    return Err(OdResult::ErrorInitFailed);
-                }
-            };
-
         Ok(Box::new(OdInstance {
             settings,
-            renderer,
+            renderer: None, // lazy — created on first render
             runtime,
             gpu_failed: false,
             aborted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -171,7 +192,7 @@ pub unsafe extern "C" fn od_destroy(handle: OdHandle) -> OdResult {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn od_is_gpu_active(handle: OdHandle) -> bool {
     match unsafe { get_instance(handle) } {
-        Some(inst) => inst.renderer.is_gpu() && !inst.gpu_failed,
+        Some(inst) => inst.renderer.as_ref().map_or(false, |r| r.is_gpu()) && !inst.gpu_failed,
         None => false,
     }
 }
@@ -973,10 +994,11 @@ pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdRe
         None => return OdResult::ErrorNullPointer,
     };
 
-    let currently_gpu = inst.renderer.is_gpu() && !inst.gpu_failed;
-    let need_recreate = use_gpu != currently_gpu
+    let currently_gpu = inst.renderer.as_ref().map_or(false, |r| r.is_gpu()) && !inst.gpu_failed;
+    let need_recreate = inst.renderer.is_none() // not yet initialised
+        || use_gpu != currently_gpu
         || (use_gpu && inst.gpu_failed)      // re-enable GPU after previous failure
-        || (!use_gpu && inst.renderer.is_gpu()); // force CPU even if GPU is active
+        || (!use_gpu && inst.renderer.as_ref().map_or(false, |r| r.is_gpu())); // force CPU
 
     if !need_recreate {
         inst.settings.render.use_gpu_if_available = use_gpu;
@@ -990,19 +1012,19 @@ pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdRe
         opendefocus::OpenDefocusRenderer::new(use_gpu, &mut new_settings),
     ) {
         Ok(new_renderer) => {
-            inst.renderer = new_renderer;
             if use_gpu {
                 inst.gpu_failed = false; // reset failure flag on GPU re-enable
             }
             log::info!(
                 "Renderer recreated: {}",
-                if inst.renderer.is_gpu() { "GPU" } else { "CPU" }
+                if new_renderer.is_gpu() { "GPU" } else { "CPU" }
             );
+            inst.renderer = Some(new_renderer);
             OdResult::Ok
         }
         Err(e) => {
             log::error!("Failed to recreate renderer: {e}");
-            // Keep old renderer as fallback
+            // Keep old renderer as fallback (if any)
             OdResult::ErrorRenderFailed
         }
     }
@@ -1135,14 +1157,21 @@ pub unsafe extern "C" fn od_render(
     inst.aborted.store(false, std::sync::atomic::Ordering::SeqCst);
     opendefocus::abort::set_aborted(false);
 
+    // Lazy-init renderer on first render (or after destroy).
+    if inst.renderer.is_none() {
+        if let Err(e) = inst.ensure_renderer() {
+            return e;
+        }
+    }
+
     // If GPU previously failed, recreate as CPU-only before attempting render
-    if inst.gpu_failed && inst.renderer.is_gpu() {
+    if inst.gpu_failed && inst.renderer.as_ref().map_or(false, |r| r.is_gpu()) {
         log::info!("GPU previously failed, recreating renderer as CPU-only");
         let mut cpu_settings = inst.settings.clone();
         cpu_settings.render.use_gpu_if_available = false;
         match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
             Ok(cpu_renderer) => {
-                inst.renderer = cpu_renderer;
+                inst.renderer = Some(cpu_renderer);
                 log::info!("CPU renderer created successfully");
             }
             Err(e) => {
@@ -1171,7 +1200,7 @@ pub unsafe extern "C" fn od_render(
     // source data into a temporary buffer, render into it, then copy only the
     // render_region back to the output image_data.
 
-    let is_gpu = inst.renderer.is_gpu() && !inst.gpu_failed;
+    let is_gpu = inst.renderer.as_ref().map_or(false, |r| r.is_gpu()) && !inst.gpu_failed;
     let stripe_h = get_stripe_height(&inst.settings, is_gpu, image_height) as i32;
     // Add extra padding beyond the convolution radius to prevent edge-clamp
     // artifacts at stripe boundaries.  The upstream kernel's bilinear sampling
@@ -1326,7 +1355,7 @@ pub unsafe extern "C" fn od_render(
             is_first_gpu_stripe = false;
 
             let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                inst.runtime.block_on(inst.renderer.render_stripe(
+                inst.runtime.block_on(inst.renderer.as_mut().unwrap().render_stripe(
                     stripe_specs.clone(),
                     inst.settings.clone(),
                     stripe_image,
@@ -1355,7 +1384,7 @@ pub unsafe extern "C" fn od_render(
                 cpu_settings.render.use_gpu_if_available = false;
                 match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
                     Ok(cpu_renderer) => {
-                        inst.renderer = cpu_renderer;
+                        inst.renderer = Some(cpu_renderer);
                         log::info!("CPU fallback renderer created");
                     }
                     Err(e) => {
@@ -1388,7 +1417,7 @@ pub unsafe extern "C" fn od_render(
 
                 opendefocus::abort::set_aborted(false);
 
-                match inst.runtime.block_on(inst.renderer.render_stripe(
+                match inst.runtime.block_on(inst.renderer.as_mut().unwrap().render_stripe(
                     stripe_specs,
                     inst.settings.clone(),
                     retry_image,
@@ -1410,7 +1439,7 @@ pub unsafe extern "C" fn od_render(
             }
         } else {
             // Subsequent stripes or already on CPU — no catch_unwind needed
-            match inst.runtime.block_on(inst.renderer.render_stripe(
+            match inst.runtime.block_on(inst.renderer.as_mut().unwrap().render_stripe(
                 stripe_specs,
                 inst.settings.clone(),
                 stripe_image,
