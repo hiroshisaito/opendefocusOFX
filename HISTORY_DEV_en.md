@@ -2087,6 +2087,45 @@ The dramatic size reduction demonstrates significant dead code elimination acros
 - No impact on stability — `lto = "thin"` is widely used in production Rust projects
 - Build time increase is the only tradeoff (acceptable for release builds)
 
+### 2026-03-27: P0 Stability Fixes (Flame Review)
+
+Based on third-party technical review of the plugin for Autodesk Flame stability and performance. See `references/Flame_OFX_Report_2026-03-27/opendefocusOFX_Flame_review.md` for the full review and `opendefocusOFX_Flame_review_analysis.md` for the analysis.
+
+#### 3.1 abort per-instance (P0 — stability)
+
+**Problem:** `od_set_aborted()` called `opendefocus::abort::set_aborted()` which is a process-wide global `AtomicBool`. With `eRenderInstanceSafe`, different instances can render in parallel — aborting instance A would cancel instance B.
+
+**Fix:**
+- Added `aborted: Arc<AtomicBool>` to `OdInstance` (per-instance flag)
+- `od_set_aborted()` now sets both per-instance and upstream global flags
+- Render start clears both flags; render end clears global flag to prevent cross-instance leakage
+- Stripe abort check reads both per-instance and global flags
+
+**Impact:** Prevents cross-instance abort interference. Safe change — upstream global flag is still used for kernel-internal abort checks, synchronised at render boundaries.
+
+#### 3.2 GPU toggle moved out of render hot path (P0 — performance)
+
+**Problem:** `render()` called `od_set_use_gpu()` every frame. When the GPU mode changed, this triggered renderer re-creation inside the render hot path, causing stuttering during interactive evaluation.
+
+**Fix:**
+- Removed `od_set_use_gpu()` from `render()`
+- GPU mode changes now handled in `changedParam(kParamUseGpu)` only
+- Renderer re-creation occurs only on explicit user parameter change
+
+**Impact:** Eliminates unnecessary renderer re-creation checks in the render hot path. The `need_recreate` guard in Rust already prevented actual re-creation when the mode hadn't changed, but the function call overhead and parameter read are now avoided entirely.
+
+#### 3.5 Focus Point depth fetch limited to penUp (P0 — Flame UI responsiveness)
+
+**Problem:** Dragging the Focus Point XY crosshair called `setValue()` on every `penMotion`, triggering `changedParam` → `fetchImage()` → full node tree re-evaluation per mouse move. This caused severe UI sluggishness, especially in Flame (Known Issue #16: fetchImage triggers full re-evaluation).
+
+**Fix:**
+- Added `sFocusPointDragging` file-scope flag, set by overlay `penDown`/`penUp`
+- `changedParam(kParamFocusPointXY)` skips depth fetch while flag is true
+- Depth sample runs once when the user releases the mouse (penUp clears the flag, then the final `setValue` triggers `changedParam` with the flag cleared)
+- Crosshair overlay continues to track the mouse smoothly during drag (position update via `setValue` is unaffected)
+
+**Impact:** Dramatically reduces node re-evaluation during drag. NDK parity note: NDK uses NUKE's scanline cache (zero-cost depth access), so per-motion sampling was free in NDK. This OFX adaptation is necessary due to the fundamental `fetchImage` cost difference.
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
@@ -2098,11 +2137,13 @@ The dramatic size reduction demonstrates significant dead code elimination acros
 - **Fusion Studio**: Load failure on Linux DEFERRED (Known Issue #26); thread safety warning fixed; Windows loads successfully
 - **Thread Safety**: Upgraded from eRenderUnsafe to eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`), binary size -57%, all platforms
+- **P0 Stability Fixes**: Per-instance abort, GPU toggle out of render, depth fetch throttling (all platforms)
 
 ### Next Steps
 
-1. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes, OpenGL link fix, Fusion Studio panic protection, Windows build support, thread safety fix, LTO optimization
+1. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes, OpenGL link fix, Fusion Studio panic protection, Windows build support, thread safety fix, LTO optimization, P0 stability fixes
 2. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
 3. **Open test feedback**: Monitor and respond to tester reports
 4. **Windows UAT**: Run UAT checklist on Windows (Fusion Studio / DaVinci Resolve)
-5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+5. **P1 improvements** (post-v4): Renderer lazy init, interactive/draft render optimization
+6. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
