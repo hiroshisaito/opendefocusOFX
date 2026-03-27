@@ -2126,6 +2126,18 @@ Based on third-party technical review of the plugin for Autodesk Flame stability
 
 **Impact:** Dramatically reduces node re-evaluation during drag. NDK parity note: NDK uses NUKE's scanline cache (zero-cost depth access), so per-motion sampling was free in NDK. This OFX adaptation is necessary due to the fundamental `fetchImage` cost difference.
 
+**Bug fix:** Initial implementation did not call `setValue()` in `penUp`, so `changedParam` never fired after drag release. Fixed by adding `position_->setValue()` in `penUp` after clearing the flag.
+
+#### P0 UAT Results (2026-03-27, Linux — NUKE / Flame)
+
+All P0 items passed. See UAT checklist section 36 for details.
+
+- **36.1 abort per-instance**: 3/3 PASS (1.3 N/A — no interactive abort trigger in NUKE/Flame)
+- **36.2 GPU toggle**: 6/6 PASS
+- **36.3 Focus Point depth fetch**: 5/5 PASS (penUp fix applied and verified)
+- **36.4 Regression**: 5/5 PASS
+- **macOS UAT**: Pending
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)

@@ -446,6 +446,49 @@ Test conditions: checker pattern test image, A/B comparison with NDK version
 | 35.8 | UHD+ resolution renders correctly | PASS | |
 | 35.9 | Focus Point + catseye/barndoors works correctly | PASS | Depth mode + Focus Point ON. NDK-equivalent output confirmed |
 
+## 36. P0 Stability Fixes (2026-03-27)
+
+Test environment: NUKE / Flame (Linux)
+
+### 36.1 abort per-instance
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 36.1.1 | Basic abort (parameter change during render) | PASS | Render interrupted by parameter change / frame move |
+| 36.1.2 | Re-render after abort | PASS | Normal render after abort |
+| 36.1.3 | Multiple nodes | PASS (N/A) | NUKE/Flame do not provide interactive abort trigger for parallel instance testing |
+
+### 36.2 GPU toggle moved out of render
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 36.2.1 | GPU render | PASS | |
+| 36.2.2 | CPU render | PASS | |
+| 36.2.3 | GPU → CPU switch | PASS | |
+| 36.2.4 | CPU → GPU switch | PASS | |
+| 36.2.5 | Rapid toggle | PASS | |
+| 36.2.6 | No re-creation on unrelated param change | PASS | No `Renderer recreated` log on Size change |
+
+### 36.3 Focus Point depth fetch limited to penUp
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 36.3.1 | Drag smoothness | PASS | Crosshair tracks smoothly during drag |
+| 36.3.2 | penUp depth sample | PASS | Focus Plane updates on mouse release |
+| 36.3.3 | depth = 0 skip | PASS | Focus Plane unchanged when released on depth=0 |
+| 36.3.4 | Click (no drag) | PASS | Focus Plane updates on click |
+| 36.3.5 | 2D mode no-op | PASS | No error without depth clip |
+
+### 36.4 Regression
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 36.4.1 | 2D mode basic render | PASS | |
+| 36.4.2 | Depth mode basic render | PASS | |
+| 36.4.3 | Filter Type switch | PASS | Filter:Image NUKE only |
+| 36.4.4 | Filter Preview | PASS | |
+| 36.4.5 | Large resolution (4K+) | PASS | |
+
 ## 31. Known Constraints (Out of Scope for This Version)
 
 The following are not implemented in v0.1.10-OFX-v1 and are out of test scope:
