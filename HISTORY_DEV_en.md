@@ -2153,9 +2153,7 @@ All P0 items passed. See UAT checklist section 36 for details.
 
 ### Next Steps
 
-1. **v0.1.10-OFX-v4 release**: Include Phase E coordinate fix, review fixes, OpenGL link fix, Fusion Studio panic protection, Windows build support, thread safety fix, LTO optimization, P0 stability fixes
-2. **Upstream Issue reporting**: Submit Issues for #1-6, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
-3. **Open test feedback**: Monitor and respond to tester reports
-4. **Windows UAT**: Run UAT checklist on Windows (Fusion Studio / DaVinci Resolve)
-5. **P1 improvements** (post-v4): Renderer lazy init, interactive/draft render optimization
-6. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+1. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
+2. **Open test feedback**: Monitor and respond to tester reports
+3. **P1 improvements**: Renderer lazy init, interactive/draft render optimization
+4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
