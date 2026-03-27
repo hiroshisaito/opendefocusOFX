@@ -41,7 +41,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v4-dev (P0 Stability Fixes)";
+static const char* kDevVersion = "v0.1.10-OFX-v4-dev (P0 Stability Fixes + penUp fix)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -242,9 +242,10 @@ public:
     bool penUp(const OFX::PenArgs& args) override {
         if (state_ == ePicked) {
             state_ = ePoised;
-            // Clear dragging flag — the next changedParam (from penUp setValue
-            // or the final position) will perform the depth fetch once.
+            // Clear dragging flag, then setValue to trigger changedParam
+            // with the flag cleared — depth fetch runs once on release.
             sFocusPointDragging = false;
+            position_->setValue(args.penPosition.x, args.penPosition.y);
             penMotion(args);
             _effect->redrawOverlays();
             return true;
