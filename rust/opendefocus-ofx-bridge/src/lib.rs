@@ -76,6 +76,9 @@ struct OdInstance {
     renderer: opendefocus::OpenDefocusRenderer,
     runtime: tokio::runtime::Runtime,
     gpu_failed: bool,
+    /// Per-instance abort flag.  Avoids cross-instance interference when
+    /// multiple instances render in parallel (eRenderInstanceSafe).
+    aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +133,7 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
             renderer,
             runtime,
             gpu_failed: false,
+            aborted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }))
     }));
 
@@ -1008,9 +1012,24 @@ pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdRe
 // Abort
 // ---------------------------------------------------------------------------
 
-/// Signal or clear the abort flag for rendering.
+/// Signal or clear the abort flag for this instance's rendering.
+///
+/// Sets the per-instance flag.  The upstream global abort flag is
+/// synchronised at render boundaries (cleared on render start, set
+/// on abort, cleared on render end).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn od_set_aborted(_handle: OdHandle, aborted: bool) -> OdResult {
+pub unsafe extern "C" fn od_set_aborted(handle: OdHandle, aborted: bool) -> OdResult {
+    let inst = match unsafe { get_instance(handle) } {
+        Some(i) => i,
+        None => {
+            // Fallback: set global flag when handle is invalid
+            opendefocus::abort::set_aborted(aborted);
+            return OdResult::ErrorNullPointer;
+        }
+    };
+    inst.aborted.store(aborted, std::sync::atomic::Ordering::SeqCst);
+    // Also propagate to upstream global flag so that internal kernel loops
+    // (which check the global flag) honour the abort request.
     opendefocus::abort::set_aborted(aborted);
     OdResult::Ok
 }
@@ -1110,7 +1129,10 @@ pub unsafe extern "C" fn od_render(
         None
     };
 
-    // Clear abort flag
+    // Clear both per-instance and global abort flags at render start.
+    // This ensures a previous abort from this or another instance does
+    // not leak into the current render.
+    inst.aborted.store(false, std::sync::atomic::Ordering::SeqCst);
     opendefocus::abort::set_aborted(false);
 
     // If GPU previously failed, recreate as CPU-only before attempting render
@@ -1198,13 +1220,18 @@ pub unsafe extern "C" fn od_render(
 
     while y_out < rr[3] {
         // Abort check between stripes (coarse — Phase 1)
-        // Check global flag (may have been set by upstream internal checks)
-        if opendefocus::abort::get_aborted() {
+        // Check per-instance flag (may have been set by upstream kernel via global flag)
+        if inst.aborted.load(std::sync::atomic::Ordering::SeqCst)
+            || opendefocus::abort::get_aborted()
+        {
+            // Clear global flag so it doesn't affect other instances
+            opendefocus::abort::set_aborted(false);
             return OdResult::Aborted;
         }
         // Check via host callback (if provided)
         if let Some(check_fn) = abort_check_fn {
             if unsafe { check_fn(abort_user_data) } {
+                inst.aborted.store(true, std::sync::atomic::Ordering::SeqCst);
                 opendefocus::abort::set_aborted(true); // propagate to upstream internals
                 return OdResult::Aborted;
             }
@@ -1402,6 +1429,10 @@ pub unsafe extern "C" fn od_render(
 
         y_out = y_out_end;
     }
+
+    // Clear global abort flag on render completion so it doesn't leak
+    // into subsequent renders of other instances.
+    opendefocus::abort::set_aborted(false);
 
     OdResult::Ok
 }

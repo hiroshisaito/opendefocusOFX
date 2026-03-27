@@ -128,6 +128,10 @@ static const char* kParamFocusPointXY  = "focusPointXY";
 // Crosshair size in screen pixels
 static const double kCrosshairScreenPx = 100.0;
 
+// Set by overlay penDown/penUp to suppress expensive depth fetch during drag.
+// File-scope flag is safe because overlay interaction is single-threaded (main thread).
+static bool sFocusPointDragging = false;
+
 class OpenDefocusOverlay : public OFX::OverlayInteract {
 protected:
     enum StateEnum { eInActive, ePoised, ePicked };
@@ -227,6 +231,8 @@ public:
         penMotion(args);
         if (state_ == ePoised) {
             state_ = ePicked;
+            // Set dragging flag — changedParam will skip depth fetch while dragging
+            sFocusPointDragging = true;
             position_->setValue(args.penPosition.x, args.penPosition.y);
             _effect->redrawOverlays();
         }
@@ -236,6 +242,9 @@ public:
     bool penUp(const OFX::PenArgs& args) override {
         if (state_ == ePicked) {
             state_ = ePoised;
+            // Clear dragging flag — the next changedParam (from penUp setValue
+            // or the final position) will perform the depth fetch once.
+            sFocusPointDragging = false;
             penMotion(args);
             _effect->redrawOverlays();
             return true;
@@ -625,10 +634,8 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     maxSize  *= renderScale;
     protect  *= renderScale;
 
-    // GPU mode toggle (recreates renderer if changed)
-    bool useGpu = true;
-    useGpuParam_->getValueAtTime(args.time, useGpu);
-    od_set_use_gpu(rustHandle_, useGpu);
+    // GPU mode is now toggled via changedParam() only — not per-render.
+    // This avoids renderer re-creation in the render hot path.
 
     // Configure Rust settings
     od_set_size(rustHandle_, static_cast<float>(size));
@@ -1089,9 +1096,19 @@ void OpenDefocusPlugin::changedParam(const OFX::InstanceChangedArgs& args,
         updateParamVisibility();
     }
 
+    // GPU mode toggle — moved out of render() hot path.
+    // Renderer is recreated only when the user explicitly changes the parameter.
+    if (paramName == kParamUseGpu && rustHandle_) {
+        bool useGpu = true;
+        useGpuParam_->getValueAtTime(args.time, useGpu);
+        od_set_use_gpu(rustHandle_, useGpu);
+    }
+
     // Focus Point XY Picker — sample depth and update Focus Plane knob
     // NDK parity: focus_point_knobchanged() (lib.rs:1033-1058)
-    if (paramName == kParamFocusPointXY) {
+    // Skip depth fetch while dragging to avoid UI sluggishness (P0-3.5).
+    // The fetch runs once on penUp when focusPointDragging_ is cleared.
+    if (paramName == kParamFocusPointXY && !sFocusPointDragging) {
         bool useFocusPoint = false;
         useFocusPointParam_->getValueAtTime(args.time, useFocusPoint);
         int mode = 0;

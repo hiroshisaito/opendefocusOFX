@@ -377,9 +377,13 @@ enum OdResult od_set_inverse_foreground(OdHandle handle, bool inverse);
 enum OdResult od_set_use_gpu(OdHandle handle, bool use_gpu);
 
 /**
- * Signal or clear the abort flag for rendering.
+ * Signal or clear the abort flag for this instance's rendering.
+ *
+ * Sets the per-instance flag.  The upstream global abort flag is
+ * synchronised at render boundaries (cleared on render start, set
+ * on abort, cleared on render end).
  */
-enum OdResult od_set_aborted(OdHandle _handle, bool aborted);
+enum OdResult od_set_aborted(OdHandle handle, bool aborted);
 
 /**
  * Main render function.
