@@ -1,4 +1,4 @@
-# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v4-dev
+# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v4
 
 ## Test Environment
 

@@ -1,6 +1,6 @@
 # OpenDefocus OFX
 
-**Version: v0.1.10-OFX-v4-dev**
+**Version: v0.1.10-OFX-v4**
 
 OpenFX port of [OpenDefocus](https://codeberg.org/gillesvink/opendefocus) — an advanced open-source convolution library for image post-processing.
 

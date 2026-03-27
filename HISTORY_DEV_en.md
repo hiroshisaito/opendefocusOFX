@@ -20,7 +20,7 @@ The ported version receives a `-OFX-v<revision>` suffix.
 - When only the OFX side is modified for the same original version, the revision is incremented
   - Example: OFX-side bug fix → `v0.1.10-OFX-v2`
 
-Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v4-dev**
+Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v4**
 
 ## Directory Structure
 
@@ -2136,7 +2136,7 @@ All P0 items passed. See UAT checklist section 36 for details.
 - **36.2 GPU toggle**: 6/6 PASS
 - **36.3 Focus Point depth fetch**: 5/5 PASS (penUp fix applied and verified)
 - **36.4 Regression**: 5/5 PASS
-- **macOS UAT**: Pending
+- **macOS UAT**: PASS (2026-03-28)
 
 ### Current Status
 
