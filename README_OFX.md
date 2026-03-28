@@ -1,6 +1,6 @@
 # OpenDefocus OFX
 
-**Version: v0.1.10-OFX-v4**
+**Version: v0.1.10-OFX-v5-dev**
 
 OpenFX port of [OpenDefocus](https://codeberg.org/gillesvink/opendefocus) — an advanced open-source convolution library for image post-processing.
 
@@ -24,9 +24,13 @@ The following NDK features are intentionally omitted from the OFX version:
 | UseCustomStripeHeight / CustomStripeHeight | Performance tuning; low priority |
 | Donate / Documentation buttons | UI-only; not applicable to OFX |
 
-### Stripe-Based Rendering (OFX-specific)
+### OFX-Specific Adaptations
 
-In the NDK version, NUKE's host engine splits the image into horizontal stripes and calls the plugin's `render()` per stripe. OFX hosts do not guarantee this behavior, so the OFX version implements its own stripe splitting inside `od_render()`. This is the only significant architectural divergence from the NDK version.
+The following are architectural adaptations to the OFX host environment. They do not modify upstream rendering logic.
+
+- **Stripe-Based Rendering** — In the NDK version, NUKE's host engine splits the image into horizontal stripes and calls the plugin's `render()` per stripe. OFX hosts do not guarantee this behavior, so the OFX version implements its own stripe splitting inside `od_render()`.
+- **Lazy Renderer Initialization** — The wgpu renderer is deferred from node creation to the first render call, keeping `createInstance` fast for large scenes with many nodes.
+- **Interactive/Draft Render** — When the host provides OFX 1.4 `interactiveRenderStatus` or `renderQualityDraft` flags, quality is automatically reduced for faster UI feedback during parameter adjustment. Note: NUKE and Flame do not currently provide these flags.
 
 ## Build
 
