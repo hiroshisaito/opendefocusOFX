@@ -2173,9 +2173,19 @@ All items passed:
 - 2D/Depth modes: PASS
 - 4K+ render: PASS
 
+### 2026-03-28: P1-3.6 Interactive/Draft Render Optimization
+
+Added automatic quality reduction during interactive rendering, using OFX standard `interactiveRenderStatus` and `renderQualityDraft` flags.
+
+**Changes:**
+- When either flag is true, quality is set to Low and samples are halved
+- Final render uses the user's original quality/samples settings
+- OFX-specific adaptation (like stripe rendering) — upstream logic unchanged
+
+**Finding:** Neither NUKE nor Flame provides these flags (always `0`). The optimization code is retained for forward compatibility with hosts that support OFX 1.4 draft rendering (e.g. DaVinci Resolve). No adverse effect on current hosts.
+
 ### Next Steps
 
-1. **P1-3.6**: Interactive/draft render optimization
-2. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
+1. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
 3. **Open test feedback**: Monitor and respond to tester reports
 4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
