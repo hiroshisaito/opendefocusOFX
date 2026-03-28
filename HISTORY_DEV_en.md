@@ -2151,9 +2151,41 @@ All P0 items passed. See UAT checklist section 36 for details.
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`), binary size -57%, all platforms
 - **P0 Stability Fixes**: Per-instance abort, GPU toggle out of render, depth fetch throttling (all platforms)
 
+### 2026-03-28: P1-3.3 Lazy Renderer Initialization
+
+Deferred renderer creation (wgpu device probe) from `od_create()` to the first render or `od_set_use_gpu()` call.
+
+**Changes:**
+- `OdInstance.renderer` changed from `OpenDefocusRenderer` to `Option<OpenDefocusRenderer>` — `None` until first use
+- Added `OdInstance::ensure_renderer()` helper for on-demand initialization
+- `od_create()` now only creates tokio runtime + default settings (lightweight)
+- All renderer access updated to handle `Option` (`as_ref`/`as_mut`/`unwrap`)
+
+**tokio runtime note:** Attempted `new_current_thread()` for lighter runtime, but wgpu's internal async operations require multi-threaded execution. `current_thread` caused complete UI freeze in Flame. Reverted to `new_multi_thread()`.
+
+#### P1-3.3 UAT Results (2026-03-28, Linux — Flame)
+
+All items passed:
+- Node creation speed: PASS (noticeably faster)
+- Initial render with lazy init: PASS (`Lazy-initializing renderer` log confirmed)
+- Subsequent renders (no re-init): PASS
+- GPU/CPU render and toggle: PASS
+- 2D/Depth modes: PASS
+- 4K+ render: PASS
+
+### 2026-03-28: P1-3.6 Interactive/Draft Render Optimization
+
+Added automatic quality reduction during interactive rendering, using OFX standard `interactiveRenderStatus` and `renderQualityDraft` flags.
+
+**Changes:**
+- When either flag is true, quality is set to Low and samples are halved
+- Final render uses the user's original quality/samples settings
+- OFX-specific adaptation (like stripe rendering) — upstream logic unchanged
+
+**Finding:** Neither NUKE nor Flame provides these flags (always `0`). The optimization code is retained for forward compatibility with hosts that support OFX 1.4 draft rendering (e.g. DaVinci Resolve). No adverse effect on current hosts.
+
 ### Next Steps
 
 1. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
-2. **Open test feedback**: Monitor and respond to tester reports
-3. **P1 improvements**: Renderer lazy init, interactive/draft render optimization
+3. **Open test feedback**: Monitor and respond to tester reports
 4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
