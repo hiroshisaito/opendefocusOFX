@@ -41,7 +41,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v5-dev (P1: Lazy Init)";
+static const char* kDevVersion = "v0.1.10-OFX-v5-dev (P1: Lazy Init + Draft Render)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -583,6 +583,16 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     qualityParam_->getValueAtTime(args.time, quality);
     int samples = 20;
     samplesParam_->getValueAtTime(args.time, samples);
+
+    // Interactive/draft render optimization (OFX-specific adaptation,
+    // similar to stripe rendering — adapts to OFX host environment).
+    // Reduce quality during interactive parameter adjustment for faster
+    // UI feedback.  Final render uses the user's original settings.
+    const bool isDraft = args.interactiveRenderStatus || args.renderQualityDraft;
+    if (isDraft) {
+        quality = 0;  // Low quality for interactive feedback
+        samples = std::max(1, samples / 2);
+    }
     int filterType = 0;
     filterTypeParam_->getValueAtTime(args.time, filterType);
     bool filterPreview = false;
