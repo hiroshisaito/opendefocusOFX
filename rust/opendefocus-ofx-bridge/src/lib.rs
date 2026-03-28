@@ -135,7 +135,7 @@ pub unsafe extern "C" fn od_create(handle_out: *mut OdHandle) -> OdResult {
     // The renderer (wgpu device probe) is deferred to the first render
     // or od_set_use_gpu() call, keeping node creation fast.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let runtime = match tokio::runtime::Builder::new_current_thread()
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
             .enable_time()
             .build()
         {
