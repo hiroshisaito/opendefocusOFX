@@ -497,6 +497,22 @@ The following are not implemented in v0.1.10-OFX-v1 and are out of test scope:
 - Camera mode (Camera input clip + camera_data parameter group)
 - Custom Stripe Height (NUKE NDK-specific stripe splitting mechanism. Requires render() architecture changes for OFX)
 
+## 37. P1-3.3 Lazy Renderer Initialization (2026-03-28)
+
+Test environment: Flame (Linux)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 37.1 | Node creation speed | PASS | Noticeably faster (no wgpu device probe) |
+| 37.2 | Initial render (lazy init) | PASS | `Lazy-initializing renderer` log confirmed |
+| 37.3 | Subsequent renders (no re-init) | PASS | No re-init log on parameter change |
+| 37.4 | GPU render | PASS | |
+| 37.5 | CPU render | PASS | |
+| 37.6 | GPU ↔ CPU toggle | PASS | `Renderer recreated` log confirmed |
+| 37.7 | 2D mode | PASS | |
+| 37.8 | Depth mode | PASS | |
+| 37.9 | 4K+ render | PASS | |
+
 ---
 
 ## FAIL Item Summary (Phase 2 UAT)
