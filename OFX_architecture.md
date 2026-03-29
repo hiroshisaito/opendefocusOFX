@@ -2,7 +2,7 @@
 
 This document summarizes the current OFX integration as implemented in the C++ plugin, the Rust FFI bridge, and the upstream OpenDefocus core.
 
-It reflects the current `master` implementation (v0.1.10-OFX-v4) including Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal), Fusion Studio compatibility (OpenGL link, catch_unwind), Windows build support, thread safety upgrade (eRenderInstanceSafe), LTO optimization, and P0 stability fixes (per-instance abort, GPU toggle, depth fetch throttling).
+It reflects the current `master` implementation (`v0.1.10-OFX-v5-dev`) including lazy renderer initialization, draft-render optimization, Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal), Fusion Studio compatibility work (`catch_unwind`, OpenGL link), Windows build support, thread safety upgrade (`eRenderInstanceSafe`), LTO optimization, and P0 stability fixes (per-instance abort, GPU toggle, depth fetch throttling).
 
 ## 1. Project Architecture
 
@@ -12,7 +12,7 @@ flowchart LR
 
   subgraph CPP["C++ Plugin Layer"]
     CPP0["Factory / descriptor<br/>describe(), describeInContext()<br/>declare contexts, clips, params, overlay"]
-    CPP1["OpenDefocusPlugin constructor<br/>fetch OFX clips and params<br/>call od_create() eagerly"]
+    CPP1["OpenDefocusPlugin constructor<br/>fetch OFX clips and params<br/>call od_create() and store OdHandle"]
     CPP2["render(), changedParam(), RoI, clip preferences<br/>build fetchWindow and host-side buffers<br/>copy final pixels back to dst"]
   end
 
@@ -21,9 +21,9 @@ flowchart LR
   end
 
   subgraph Bridge["Rust Bridge Layer"]
-    RB0["od_create()<br/>init logging + tokio runtime<br/>create GPU-preferred renderer eagerly"]
-    RB1["OdInstance<br/>settings + renderer + tokio runtime + gpu_failed"]
-    RB2["od_set_* setters<br/>od_set_use_gpu()<br/>od_render() stripe orchestration"]
+    RB0["od_create()<br/>init logging + tokio runtime<br/>seed default settings only"]
+    RB1["OdInstance<br/>settings + optional renderer<br/>tokio runtime + gpu_failed + aborted"]
+    RB2["od_set_* setters<br/>od_set_use_gpu() recreate/select renderer<br/>od_render() lazy init + stripe orchestration"]
   end
 
   subgraph Core["Rust Core Layer"]
@@ -60,13 +60,14 @@ Relevant files:
 
 ## 2. Host, Context, and Initialization Behavior
 
-- Tested and supported hosts are **NUKE** and **Flame**. Other OFX hosts are currently untested.
-- `describeInContext()` branches the parameter layout by `hostName`: NUKE uses one topology, Flame uses another. This is a UI/layout branch, not a render backend branch.
+- The validated host matrix in the repo docs is **NUKE** and **Flame**. In code, only Flame gets a dedicated UI topology path; all non-Flame hosts share the generic descriptor layout.
+- `describeInContext()` branches UI/layout by `hostName`: Flame uses split subgroup columns, while NUKE, Resolve, Fusion, and other non-Flame hosts use the flat 4-page layout. This is a UI branch, not a render backend branch.
 - The descriptor currently advertises both `eContextGeneral` and `eContextFilter`.
 - `Source` and `Output` clips are defined in all contexts. `Depth` and `Filter` clips are defined only in `eContextGeneral`.
 - The plugin constructor currently calls `fetchClip()` for `Source`, `Depth`, `Filter`, and `Output` unconditionally, then calls `od_create()` immediately.
-- `od_create()` eagerly initializes Rust logging, creates a Tokio runtime, and creates a GPU-preferred `OpenDefocusRenderer` before the first render.
-- This eager initialization path and the partial `eContextFilter` contract are architecturally important when debugging host startup or plugin-load failures on stricter OFX hosts.
+- `od_create()` initializes Rust logging, creates a Tokio runtime, and seeds default settings, but leaves `renderer: None`. The actual renderer is created lazily on first `od_render()` or explicit `od_set_use_gpu()`.
+- On macOS + NUKE, `Use Focus Point` and `Focus Point XY` are hidden/disabled because the overlay interact path is disabled there. Flame macOS keeps them enabled.
+- This partial `eContextFilter` contract, together with eager clip fetching in the constructor, is architecturally important when debugging host startup or plugin-load failures on stricter OFX hosts.
 
 Relevant files:
 
@@ -84,7 +85,7 @@ flowchart TD
   E["Throw OFX error or return"]
   I{"No Rust handle or Size <= 0?"}
   Pass["Memcpy src -> dst<br/>pass-through"]
-  P["Read OFX params<br/>apply renderScale.x<br/>od_set_use_gpu() + od_set_*"]
+  P["Read OFX params<br/>draft renders force low quality + fewer samples<br/>apply renderScale.x and od_set_*"]
   Prev{"Filter preview path?"}
   PrevBuf["Build previewBuf<br/>force 2D + preview resolution"]
   Build["Compute fetchWindow<br/>expand Y by blur margin only<br/>use full buffer width"]
@@ -97,14 +98,16 @@ flowchart TD
   Call["Call od_render()<br/>with previewBuf or imageBuffer"]
 
   subgraph Bridge["Rust FFI Bridge: od_render()"]
-    R0["Validate pointers and regions<br/>build filter template<br/>clear abort flag"]
+    R0["Validate pointers and regions<br/>build filter template<br/>clear abort flags"]
+    R0A{"renderer is None?"}
+    R0B["ensure_renderer()<br/>lazy-create renderer from current GPU setting"]
     R1{"gpu_failed while renderer is still GPU?"}
     R1A["Recreate CPU renderer before rendering"]
     R2["Choose stripe_h<br/>preview = full height, focal setup = 32<br/>CPU = 256, GPU = 128/256 by quality<br/>padding = defocus padding + 4"]
     R3["Clone source_image snapshot<br/>pre-allocate reusable stripe_buf"]
     R4{"More stripes in render_region?"}
-    R4A{"Abort requested?<br/>global flag or host callback"}
-    R5["Reuse stripe_buf and stripe_depth<br/>compute y_in/y_out and stripe_specs<br/>full_region.y = absolute stripe Y"]
+    R4A{"Abort requested?<br/>instance/global abort sync or host callback"}
+    R5["Reuse stripe_buf<br/>rebuild stripe_depth as needed<br/>compute y_in/y_out and stripe_specs<br/>full_region.y = absolute stripe Y"]
     R6{"First GPU stripe?"}
     R7["render_stripe() inside catch_unwind"]
     R8{"GPU stripe succeeded?"}
@@ -147,7 +150,9 @@ flowchart TD
   Fil -- "no" --> Geo
   Geo --> Call
 
-  Call --> R0 --> R1
+  Call --> R0 --> R0A
+  R0A -- "yes" --> R0B --> R1
+  R0A -- "no" --> R1
   R1 -- "yes" --> R1A --> R2
   R1 -- "no" --> R2
   R2 --> R3 --> R4
@@ -187,17 +192,21 @@ Relevant files:
 
 ## 4. Current Behavior Notes
 
-- Tested hosts are NUKE and Flame. Resolve and Fusion are not part of the validated host matrix for this port.
-- `describeInContext()` performs host-specific UI topology branching via `OFX::getImageEffectHostDescription()->hostName`.
+- Tested hosts in the repo docs are NUKE and Flame. Resolve and Fusion are not part of the validated host matrix, even though non-Flame hosts share the generic descriptor path.
+- `describeInContext()` performs host-specific UI topology branching via `OFX::getImageEffectHostDescription()->hostName`: Flame gets split subgroup columns, while non-Flame hosts share the flat 4-page layout.
+- On macOS + NUKE, `Use Focus Point` and `Focus Point XY` are hidden/disabled because the overlay interact path is disabled there.
 - The plugin advertises `eContextGeneral` and `eContextFilter`, but `Depth` and `Filter` clips are only declared in `eContextGeneral`.
 - The constructor still fetches `Depth` and `Filter` clips unconditionally and calls `od_create()` eagerly. This is a current compatibility risk for hosts that instantiate or validate plugins strictly during startup scan.
-- `od_create()` eagerly creates the Tokio runtime and a GPU-preferred renderer. GPU backend creation is therefore not deferred until first render.
+- `od_create()` creates the Tokio runtime and default settings, but does not create the renderer. Renderer creation is deferred to the first `od_render()` or an explicit `od_set_use_gpu()` call.
+- GPU mode toggling now happens in `changedParam()` via `od_set_use_gpu()`. `render()` no longer recreates renderers on the hot path.
+- Interactive or draft renders force `Quality = Low` and halve the sample count for faster feedback.
 - C++ no longer caps `bufWidth` to `4096`. The full `fetchWindow` width is used, and stripe splitting keeps each stripe buffer under the wgpu storage-buffer limit.
 - Rust still uses the upstream `ChunkHandler(limit = 4096)` inside `RenderEngine`, so images wider than `4096px` can still hit the upstream horizontal chunk path and its known seam issue.
 - `render()` fetches `Depth` only in Depth mode. `getRegionsOfInterest()` also requests `Depth` only in Depth mode, avoiding unnecessary upstream evaluation in 2D mode and Filter Preview.
 - RoI expands only in Y. X overscan is not requested because the render buffer uses render-window width and edge sampling is handled by ClampToEdge behavior.
 - Geometry passed to Rust is RoD-based: `resolution` comes from source RoD, `center` is RoD-local, and stripe `full_region.y` carries absolute Y for position-dependent effects.
 - The implementation uses `renderScale.x` only and assumes uniform render scale.
-- Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback. If abort is detected, Rust returns `ABORTED`, C++ restores pristine source pixels into `imageBuffer`, and the normal overscan-safe dst copy path writes an unprocessed frame.
+- Output RoD is pinned to the Source clip's RoD. `getClipPreferences()` mirrors source components, and mirrors bit depth / PAR when the host advertises those capabilities.
+- Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback, while Rust keeps a per-instance abort flag and synchronizes the upstream global flag at render boundaries. If abort is detected, Rust returns `ABORTED`, C++ restores pristine source pixels into `imageBuffer`, and the normal overscan-safe dst copy path writes an unprocessed frame.
 - Filter Preview is only enabled for `Disc` and `Blade`. In Rust, preview renders use full-height stripe size to bypass stripe splitting and avoid preview seams.
 - Phase D reduced stripe overhead by reusing a pre-allocated `stripe_buf`, but each render still clones the full source image once because the upstream render API requires mutable ownership of the working image buffer.

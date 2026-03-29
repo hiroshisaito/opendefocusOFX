@@ -41,7 +41,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v5-dev (P1: Lazy Init + Draft Render)";
+static const char* kDevVersion = "v0.1.10-OFX-v5-dev (P1: Lazy Init + Draft Render + Context Guard)";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -267,8 +267,10 @@ public:
         , rustHandle_(nullptr)
     {
         srcClip_    = fetchClip(kClipSource);
-        depthClip_  = fetchClip(kClipDepth);
-        filterClip_ = fetchClip(kClipFilter);
+        // Depth and Filter clips are only defined in General context.
+        // fetchClip() on an undefined clip throws in strict OFX hosts.
+        depthClip_  = (getContext() == OFX::eContextGeneral) ? fetchClip(kClipDepth)  : nullptr;
+        filterClip_ = (getContext() == OFX::eContextGeneral) ? fetchClip(kClipFilter) : nullptr;
         dstClip_    = fetchClip(kClipOutput);
 
         useGpuParam_     = fetchBooleanParam(kParamUseGpu);
@@ -338,6 +340,9 @@ public:
         // Initialize Rust backend
         OdResult res = od_create(&rustHandle_);
         if (res != OK) {
+            fprintf(stderr, "[OpenDefocusOFX] od_create() failed (code %d) — plugin will pass through source\n",
+                    static_cast<int>(res));
+            fflush(stderr);
             rustHandle_ = nullptr;
         }
 
@@ -566,7 +571,11 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     sizeParam_->getValueAtTime(args.time, size);
     focusPlaneParam_->getValueAtTime(args.time, focusPlane);
 
-    // Fallback: pass-through if no Rust handle or size is zero
+    // Fallback: pass-through if no Rust handle (od_create failed) or size is zero
+    if (!rustHandle_) {
+        fprintf(stderr, "[OpenDefocusOFX] render(): no Rust handle — passing through source\n");
+        fflush(stderr);
+    }
     if (!rustHandle_ || size <= 0.0) {
         for (int y = rw.y1; y < rw.y2; ++y) {
             const float* srcRow = static_cast<const float*>(src->getPixelAddress(rw.x1, y));
@@ -1081,7 +1090,10 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     }
 
     if (res != OK && res != ABORTED) {
-        // Log warning but don't throw — the buffer still has valid source data
+        // Don't throw — the buffer still has valid source data (pass-through)
+        fprintf(stderr, "[OpenDefocusOFX] od_render() failed (code %d) — outputting source passthrough\n",
+                static_cast<int>(res));
+        fflush(stderr);
     }
 }
 
