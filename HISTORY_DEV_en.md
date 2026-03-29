@@ -2184,8 +2184,39 @@ Added automatic quality reduction during interactive rendering, using OFX standa
 
 **Finding:** Neither NUKE nor Flame provides these flags (always `0`). The optimization code is retained for forward compatibility with hosts that support OFX 1.4 draft rendering (e.g. DaVinci Resolve). No adverse effect on current hosts.
 
+### 2026-03-29: Static Review Fixes — eContextFilter Guard + Failure Logging
+
+Static review by the review team identified two issues in the current codebase. Both fixed in commit `6672d1c`.
+
+#### Fix 1: eContextFilter clip fetch guard (Known Issue restoration)
+
+**Problem:** `describeInContext()` defines `Depth` and `Filter` clips only when `context == eContextGeneral`, but the constructor called `fetchClip(kClipDepth)` and `fetchClip(kClipFilter)` unconditionally. On OFX hosts that strictly validate clip existence, this could throw in Filter context. This guard was documented in HISTORY_DEV_en.md as having been applied previously (L618), but was lost in a prior refactor.
+
+**Fix:** Constructor now guards both fetches:
+```cpp
+depthClip_  = (getContext() == OFX::eContextGeneral) ? fetchClip(kClipDepth)  : nullptr;
+filterClip_ = (getContext() == OFX::eContextGeneral) ? fetchClip(kClipFilter) : nullptr;
+```
+Downstream `depthClip_->isConnected()` / `filterClip_->isConnected()` calls were already null-guarded, so no further changes needed.
+
+#### Fix 2: Failure diagnostics (stderr logging)
+
+**Problem:** Three failure paths were completely silent:
+- `od_create()` returning non-OK — `rustHandle_` set to `nullptr` with no log
+- `render()` called with null `rustHandle_` — silent passthrough
+- `od_render()` returning non-OK/non-ABORTED — empty block with only a comment
+
+**Fix:** Added `fprintf(stderr, ...)` + `fflush(stderr)` to all three paths. Passthrough design is unchanged — only observability improved.
+
+#### kDevVersion
+`v0.1.10-OFX-v5-dev (P1: Lazy Init + Draft Render + Context Guard)`
+
+#### OFX_architecture.md
+Updated to reflect v5-dev state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
+
 ### Next Steps
 
 1. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
-3. **Open test feedback**: Monitor and respond to tester reports
-4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+2. **Open test feedback**: Monitor and respond to tester reports
+3. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+4. **GPU toggle state feedback** (backlog): When `od_set_use_gpu()` fails, settings and actual renderer state diverge; consider UI feedback or settings rollback
