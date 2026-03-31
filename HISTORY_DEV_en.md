@@ -2214,9 +2214,29 @@ Downstream `depthClip_->isConnected()` / `filterClip_->isConnected()` calls were
 #### OFX_architecture.md
 Updated to reflect v5-dev state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
 
+### 2026-03-30: Windows UAT — v0.1.10-OFX-v5-dev
+
+Windows (MinGW build) UAT completed. No issues found.
+
+- **Host**: Fusion Studio (Windows)
+- **Build**: `v0.1.10-OFX-v5-dev`, MinGW GCC 13.2.0, Rust stable-x86_64-pc-windows-gnu
+- **Result**: PASS — all tested scenarios passed without issues
+
+### Current Status
+
+- **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
+- **macOS Support**: Complete, v0.1.10-OFX-v3 released (Linux + macOS)
+- **Windows Support**: Complete, UAT passed (Fusion Studio, v5-dev)
+- **P0 Stability Fixes**: Complete (per-instance abort, GPU toggle, depth fetch throttling)
+- **P1 Improvements**: Complete (lazy renderer init, draft render optimization, eContextFilter guard, failure logging)
+- **Thread Safety**: eRenderUnsafe → eRenderInstanceSafe (all platforms)
+- **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`)
+- **Current dev version**: `v0.1.10-OFX-v5-dev`
+
 ### Next Steps
 
-1. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
-2. **Open test feedback**: Monitor and respond to tester reports
-3. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
-4. **GPU toggle state feedback** (backlog): When `od_set_use_gpu()` fails, settings and actual renderer state diverge; consider UI feedback or settings rollback
+1. **v0.1.10-OFX-v5 release**: Windows + P1 improvements
+2. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
+3. **Open test feedback**: Monitor and respond to tester reports
+4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+5. **GPU toggle state feedback** (backlog): When `od_set_use_gpu()` fails, settings and actual renderer state diverge; consider UI feedback or settings rollback
