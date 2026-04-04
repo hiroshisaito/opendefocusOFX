@@ -2215,7 +2215,7 @@ Downstream `depthClip_->isConnected()` / `filterClip_->isConnected()` calls were
 `v0.1.10-OFX-v5`
 
 #### OFX_architecture.md
-Updated to reflect v5-dev state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
+Updated to reflect v5 state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
 
 ### Next Steps
 
