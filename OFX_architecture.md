@@ -2,7 +2,7 @@
 
 This document summarizes the current OFX integration as implemented in the C++ plugin, the Rust FFI bridge, and the upstream OpenDefocus core.
 
-It reflects the current `master` implementation (`v0.1.10-OFX-v5`) including lazy renderer initialization, draft-render optimization, Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal, eContextFilter clip guard), Fusion Studio compatibility work (`catch_unwind`, OpenGL link), Windows build support, thread safety upgrade (`eRenderInstanceSafe`), LTO optimization, and P0 stability fixes (per-instance abort, GPU toggle, depth fetch throttling).
+It reflects the current `master` implementation (post-`v0.1.10-OFX-v5`) including lazy renderer initialization, draft-render optimization, Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal, eContextFilter clip guard), Fusion Studio compatibility work (`catch_unwind`, OpenGL link), Windows build support, thread safety upgrade (`eRenderInstanceSafe`), LTO optimization, and the current stability fixes around abort propagation, GPU toggle, and depth fetch throttling.
 
 ## 1. Project Architecture
 
@@ -98,7 +98,7 @@ flowchart TD
   Call["Call od_render()<br/>with previewBuf or imageBuffer"]
 
   subgraph Bridge["Rust FFI Bridge: od_render()"]
-    R0["Validate pointers and regions<br/>build filter template<br/>clear abort flags"]
+    R0["Validate handle/image pointer<br/>read full_region/render_region<br/>build filter template<br/>clear abort flags"]
     R0A{"renderer is None?"}
     R0B["ensure_renderer()<br/>lazy-create renderer from current GPU setting"]
     R1{"gpu_failed while renderer is still GPU?"}
@@ -133,7 +133,7 @@ flowchart TD
     C12["Blend back into chunk image<br/>output + original * (1 - alpha)"]
   end
 
-  AbortFix["If od_render() returns ABORTED<br/>repopulate imageBuffer from pristine source"]
+  AbortFix["If od_render() returns ABORTED<br/>repopulate imageBuffer from Source clip<br/>via ClampToEdge copySourceToBuffer()"]
   Post["C++ post-process after od_render returns<br/>previewBuf: clear dst + center-copy<br/>imageBuffer: copy intersection + overscan edge replicate"]
   Ok["render() returns to host"]
 
@@ -207,6 +207,6 @@ Relevant files:
 - Geometry passed to Rust is RoD-based: `resolution` comes from source RoD, `center` is RoD-local, and stripe `full_region.y` carries absolute Y for position-dependent effects.
 - The implementation uses `renderScale.x` only and assumes uniform render scale.
 - Output RoD is pinned to the Source clip's RoD. `getClipPreferences()` mirrors source components, and mirrors bit depth / PAR when the host advertises those capabilities.
-- Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback, while Rust keeps a per-instance abort flag and synchronizes the upstream global flag at render boundaries. If abort is detected, Rust returns `ABORTED`, C++ restores pristine source pixels into `imageBuffer`, and the normal overscan-safe dst copy path writes an unprocessed frame.
+- Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback, while Rust keeps a per-instance abort flag and synchronizes the upstream global flag at render boundaries. If abort is detected, Rust returns `ABORTED`, C++ repopulates `imageBuffer` from the Source clip with ClampToEdge padding, and the normal overscan-safe dst copy path writes an unprocessed frame.
 - Filter Preview is only enabled for `Disc` and `Blade`. In Rust, preview renders use full-height stripe size to bypass stripe splitting and avoid preview seams.
 - Phase D reduced stripe overhead by reusing a pre-allocated `stripe_buf`, but each render still clones the full source image once because the upstream render API requires mutable ownership of the working image buffer.
