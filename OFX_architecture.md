@@ -2,7 +2,7 @@
 
 This document summarizes the current OFX integration as implemented in the C++ plugin, the Rust FFI bridge, and the upstream OpenDefocus core.
 
-It reflects the current `master` implementation (`v0.1.10-OFX-v5-dev`) including lazy renderer initialization, draft-render optimization, Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal), Fusion Studio compatibility work (`catch_unwind`, OpenGL link), Windows build support, thread safety upgrade (`eRenderInstanceSafe`), LTO optimization, and P0 stability fixes (per-instance abort, GPU toggle, depth fetch throttling).
+It reflects the current `master` implementation (`v0.1.10-OFX-v5`) including lazy renderer initialization, draft-render optimization, Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal, eContextFilter clip guard), Fusion Studio compatibility work (`catch_unwind`, OpenGL link), Windows build support, thread safety upgrade (`eRenderInstanceSafe`), LTO optimization, and P0 stability fixes (per-instance abort, GPU toggle, depth fetch throttling).
 
 ## 1. Project Architecture
 

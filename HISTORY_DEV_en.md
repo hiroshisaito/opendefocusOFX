@@ -20,7 +20,7 @@ The ported version receives a `-OFX-v<revision>` suffix.
 - When only the OFX side is modified for the same original version, the revision is incremented
   - Example: OFX-side bug fix → `v0.1.10-OFX-v2`
 
-Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v4**
+Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v5**
 
 ## Directory Structure
 
@@ -2209,7 +2209,7 @@ Downstream `depthClip_->isConnected()` / `filterClip_->isConnected()` calls were
 **Fix:** Added `fprintf(stderr, ...)` + `fflush(stderr)` to all three paths. Passthrough design is unchanged — only observability improved.
 
 #### kDevVersion
-`v0.1.10-OFX-v5-dev (P1: Lazy Init + Draft Render + Context Guard)`
+`v0.1.10-OFX-v5`
 
 #### OFX_architecture.md
 Updated to reflect v5-dev state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
