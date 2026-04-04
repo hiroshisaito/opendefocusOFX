@@ -64,10 +64,10 @@ Relevant files:
 - `describeInContext()` branches UI/layout by `hostName`: Flame uses split subgroup columns, while NUKE, Resolve, Fusion, and other non-Flame hosts use the flat 4-page layout. This is a UI branch, not a render backend branch.
 - The descriptor currently advertises both `eContextGeneral` and `eContextFilter`.
 - `Source` and `Output` clips are defined in all contexts. `Depth` and `Filter` clips are defined only in `eContextGeneral`.
-- The plugin constructor currently calls `fetchClip()` for `Source`, `Depth`, `Filter`, and `Output` unconditionally, then calls `od_create()` immediately.
+- The plugin constructor calls `fetchClip()` for `Source` and `Output` unconditionally. `Depth` and `Filter` clips are fetched only when `getContext() == eContextGeneral`; in `eContextFilter` they are set to `nullptr`. This matches the `describeInContext()` contract and prevents throws on strict OFX hosts.
 - `od_create()` initializes Rust logging, creates a Tokio runtime, and seeds default settings, but leaves `renderer: None`. The actual renderer is created lazily on first `od_render()` or explicit `od_set_use_gpu()`.
 - On macOS + NUKE, `Use Focus Point` and `Focus Point XY` are hidden/disabled because the overlay interact path is disabled there. Flame macOS keeps them enabled.
-- This partial `eContextFilter` contract, together with eager clip fetching in the constructor, is architecturally important when debugging host startup or plugin-load failures on stricter OFX hosts.
+- The partial `eContextFilter` contract (Depth/Filter clips defined in General only, advertised in both) is architecturally important when debugging host startup or plugin-load failures on stricter OFX hosts.
 
 Relevant files:
 
@@ -196,7 +196,7 @@ Relevant files:
 - `describeInContext()` performs host-specific UI topology branching via `OFX::getImageEffectHostDescription()->hostName`: Flame gets split subgroup columns, while non-Flame hosts share the flat 4-page layout.
 - On macOS + NUKE, `Use Focus Point` and `Focus Point XY` are hidden/disabled because the overlay interact path is disabled there.
 - The plugin advertises `eContextGeneral` and `eContextFilter`, but `Depth` and `Filter` clips are only declared in `eContextGeneral`.
-- The constructor still fetches `Depth` and `Filter` clips unconditionally and calls `od_create()` eagerly. This is a current compatibility risk for hosts that instantiate or validate plugins strictly during startup scan.
+- The constructor fetches `Depth` and `Filter` clips only in `eContextGeneral` (context-guarded since v5). `od_create()` is called eagerly but only seeds settings — no renderer or GPU probe at construction time.
 - `od_create()` creates the Tokio runtime and default settings, but does not create the renderer. Renderer creation is deferred to the first `od_render()` or an explicit `od_set_use_gpu()` call.
 - GPU mode toggling now happens in `changedParam()` via `od_set_use_gpu()`. `render()` no longer recreates renderers on the hot path.
 - Interactive or draft renders force `Quality = Low` and halve the sample count for faster feedback.

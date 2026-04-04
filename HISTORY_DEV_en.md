@@ -2150,6 +2150,9 @@ All P0 items passed. See UAT checklist section 36 for details.
 - **Thread Safety**: Upgraded from eRenderUnsafe to eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`), binary size -57%, all platforms
 - **P0 Stability Fixes**: Per-instance abort, GPU toggle out of render, depth fetch throttling (all platforms)
+- **P1 Performance**: Lazy renderer initialization complete, merged to master (v0.1.10-OFX-v5)
+- **eContextFilter Guard**: fetchClip context guard restored, merged to master (v0.1.10-OFX-v5)
+- **Failure Diagnostics**: stderr logging added for od_create/od_render failure paths (v0.1.10-OFX-v5)
 
 ### 2026-03-28: P1-3.3 Lazy Renderer Initialization
 
