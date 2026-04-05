@@ -2,7 +2,7 @@
 
 This document summarizes the current OFX integration as implemented in the C++ plugin, the Rust FFI bridge, and the upstream OpenDefocus core.
 
-It reflects the current `master` implementation (`v0.1.10-OFX-v5`) including lazy renderer initialization, draft-render optimization, Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal, eContextFilter clip guard), Fusion Studio compatibility work (`catch_unwind`, OpenGL link), Windows build support, thread safety upgrade (`eRenderInstanceSafe`), LTO optimization, and P0 stability fixes (per-instance abort, GPU toggle, depth fetch throttling).
+It reflects the current `master` implementation (post-`v0.1.10-OFX-v5`) including lazy renderer initialization, draft-render optimization, Phase E coordinate-system fixes, review fixes (Depth fetch guard, RoI X overscan removal, eContextFilter clip guard), Fusion Studio compatibility work (`catch_unwind`, OpenGL link), Windows build support, thread safety upgrade (`eRenderInstanceSafe`), LTO optimization, and the current stability fixes around abort propagation, GPU toggle, and depth fetch throttling.
 
 ## 1. Project Architecture
 
@@ -64,10 +64,10 @@ Relevant files:
 - `describeInContext()` branches UI/layout by `hostName`: Flame uses split subgroup columns, while NUKE, Resolve, Fusion, and other non-Flame hosts use the flat 4-page layout. This is a UI branch, not a render backend branch.
 - The descriptor currently advertises both `eContextGeneral` and `eContextFilter`.
 - `Source` and `Output` clips are defined in all contexts. `Depth` and `Filter` clips are defined only in `eContextGeneral`.
-- The plugin constructor currently calls `fetchClip()` for `Source`, `Depth`, `Filter`, and `Output` unconditionally, then calls `od_create()` immediately.
+- The plugin constructor calls `fetchClip()` for `Source` and `Output` unconditionally. `Depth` and `Filter` clips are fetched only when `getContext() == eContextGeneral`; in `eContextFilter` they are set to `nullptr`. This matches the `describeInContext()` contract and prevents throws on strict OFX hosts.
 - `od_create()` initializes Rust logging, creates a Tokio runtime, and seeds default settings, but leaves `renderer: None`. The actual renderer is created lazily on first `od_render()` or explicit `od_set_use_gpu()`.
 - On macOS + NUKE, `Use Focus Point` and `Focus Point XY` are hidden/disabled because the overlay interact path is disabled there. Flame macOS keeps them enabled.
-- This partial `eContextFilter` contract, together with eager clip fetching in the constructor, is architecturally important when debugging host startup or plugin-load failures on stricter OFX hosts.
+- The partial `eContextFilter` contract (Depth/Filter clips defined in General only, advertised in both) is architecturally important when debugging host startup or plugin-load failures on stricter OFX hosts.
 
 Relevant files:
 
@@ -98,7 +98,7 @@ flowchart TD
   Call["Call od_render()<br/>with previewBuf or imageBuffer"]
 
   subgraph Bridge["Rust FFI Bridge: od_render()"]
-    R0["Validate pointers and regions<br/>build filter template<br/>clear abort flags"]
+    R0["Validate handle/image pointer<br/>read full_region/render_region<br/>build filter template<br/>clear abort flags"]
     R0A{"renderer is None?"}
     R0B["ensure_renderer()<br/>lazy-create renderer from current GPU setting"]
     R1{"gpu_failed while renderer is still GPU?"}
@@ -133,7 +133,7 @@ flowchart TD
     C12["Blend back into chunk image<br/>output + original * (1 - alpha)"]
   end
 
-  AbortFix["If od_render() returns ABORTED<br/>repopulate imageBuffer from pristine source"]
+  AbortFix["If od_render() returns ABORTED<br/>repopulate imageBuffer from Source clip<br/>via ClampToEdge copySourceToBuffer()"]
   Post["C++ post-process after od_render returns<br/>previewBuf: clear dst + center-copy<br/>imageBuffer: copy intersection + overscan edge replicate"]
   Ok["render() returns to host"]
 
@@ -196,7 +196,7 @@ Relevant files:
 - `describeInContext()` performs host-specific UI topology branching via `OFX::getImageEffectHostDescription()->hostName`: Flame gets split subgroup columns, while non-Flame hosts share the flat 4-page layout.
 - On macOS + NUKE, `Use Focus Point` and `Focus Point XY` are hidden/disabled because the overlay interact path is disabled there.
 - The plugin advertises `eContextGeneral` and `eContextFilter`, but `Depth` and `Filter` clips are only declared in `eContextGeneral`.
-- The constructor still fetches `Depth` and `Filter` clips unconditionally and calls `od_create()` eagerly. This is a current compatibility risk for hosts that instantiate or validate plugins strictly during startup scan.
+- The constructor fetches `Depth` and `Filter` clips only in `eContextGeneral` (context-guarded since v5). `od_create()` is called eagerly but only seeds settings — no renderer or GPU probe at construction time.
 - `od_create()` creates the Tokio runtime and default settings, but does not create the renderer. Renderer creation is deferred to the first `od_render()` or an explicit `od_set_use_gpu()` call.
 - GPU mode toggling now happens in `changedParam()` via `od_set_use_gpu()`. `render()` no longer recreates renderers on the hot path.
 - Interactive or draft renders force `Quality = Low` and halve the sample count for faster feedback.
@@ -207,6 +207,6 @@ Relevant files:
 - Geometry passed to Rust is RoD-based: `resolution` comes from source RoD, `center` is RoD-local, and stripe `full_region.y` carries absolute Y for position-dependent effects.
 - The implementation uses `renderScale.x` only and assumes uniform render scale.
 - Output RoD is pinned to the Source clip's RoD. `getClipPreferences()` mirrors source components, and mirrors bit depth / PAR when the host advertises those capabilities.
-- Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback, while Rust keeps a per-instance abort flag and synchronizes the upstream global flag at render boundaries. If abort is detected, Rust returns `ABORTED`, C++ restores pristine source pixels into `imageBuffer`, and the normal overscan-safe dst copy path writes an unprocessed frame.
+- Abort handling is coarse-grained: the host `abort()` state is queried between stripes via the FFI callback, while Rust keeps a per-instance abort flag and synchronizes the upstream global flag at render boundaries. If abort is detected, Rust returns `ABORTED`, C++ repopulates `imageBuffer` from the Source clip with ClampToEdge padding, and the normal overscan-safe dst copy path writes an unprocessed frame.
 - Filter Preview is only enabled for `Disc` and `Blade`. In Rust, preview renders use full-height stripe size to bypass stripe splitting and avoid preview seams.
 - Phase D reduced stripe overhead by reusing a pre-allocated `stripe_buf`, but each render still clones the full source image once because the upstream render API requires mutable ownership of the working image buffer.
