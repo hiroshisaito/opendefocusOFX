@@ -20,7 +20,7 @@ The ported version receives a `-OFX-v<revision>` suffix.
 - When only the OFX side is modified for the same original version, the revision is incremented
   - Example: OFX-side bug fix → `v0.1.10-OFX-v2`
 
-Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v4**
+Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v5**
 
 ## Directory Structure
 
@@ -2150,6 +2150,9 @@ All P0 items passed. See UAT checklist section 36 for details.
 - **Thread Safety**: Upgraded from eRenderUnsafe to eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`), binary size -57%, all platforms
 - **P0 Stability Fixes**: Per-instance abort, GPU toggle out of render, depth fetch throttling (all platforms)
+- **P1 Performance**: Lazy renderer initialization complete, merged to master (v0.1.10-OFX-v5)
+- **eContextFilter Guard**: fetchClip context guard restored, merged to master (v0.1.10-OFX-v5)
+- **Failure Diagnostics**: stderr logging added for od_create/od_render failure paths (v0.1.10-OFX-v5)
 
 ### 2026-03-28: P1-3.3 Lazy Renderer Initialization
 
@@ -2209,10 +2212,10 @@ Downstream `depthClip_->isConnected()` / `filterClip_->isConnected()` calls were
 **Fix:** Added `fprintf(stderr, ...)` + `fflush(stderr)` to all three paths. Passthrough design is unchanged — only observability improved.
 
 #### kDevVersion
-`v0.1.10-OFX-v5-dev (P1: Lazy Init + Draft Render + Context Guard)`
+`v0.1.10-OFX-v5`
 
 #### OFX_architecture.md
-Updated to reflect v5-dev state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
+Updated to reflect v5 state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
 
 ### 2026-03-30: Windows UAT — v0.1.10-OFX-v5-dev
 
