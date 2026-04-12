@@ -59,15 +59,13 @@ set(RUST_STATICLIB "${RUST_LIB_DIR}/libopendefocus_ofx_bridge.a")
 # where CMake's OUTPUT-based dependency tracking doesn't see Rust source
 # changes (the .a already exists) and silently skips recompilation.
 if(WIN32)
-    # Windows (MinGW): set PROTOC to system protoc (protobuf-vendored not used),
-    # and pass -Wa,-mbig-obj to handle large COFF sections in protobuf-src.
+    # Windows (MSYS2 UCRT64): set PROTOC to system protoc (protobuf-vendored not
+    # used on Windows; see Cargo.toml cfg(not(windows)) dependency section).
+    # PATH is inherited from the build environment; cargo must be in PATH already.
     find_program(PROTOC_EXECUTABLE protoc REQUIRED)
     add_custom_target(rust_bridge ALL
         COMMAND ${CMAKE_COMMAND} -E env
-            "PATH=$ENV{USERPROFILE}/.cargo/bin;$ENV{PATH}"
             "PROTOC=${PROTOC_EXECUTABLE}"
-            "CFLAGS=-Wa,-mbig-obj"
-            "CXXFLAGS=-Wa,-mbig-obj"
             cargo build ${CARGO_BUILD_FLAG} ${CARGO_TARGET_FLAG}
         WORKING_DIRECTORY "${RUST_BRIDGE_DIR}"
         COMMENT "Building Rust opendefocus-ofx-bridge staticlib"
@@ -135,7 +133,7 @@ if(APPLE)
         ${COREFOUNDATION_FRAMEWORK}
         ${OBJC_LIB})
 elseif(WIN32)
-    # Windows (MinGW): Rust wgpu uses D3D12/Vulkan backends.
+    # Windows (MSYS2 UCRT64): Rust wgpu uses D3D12/Vulkan backends.
     # System libraries required by Rust std + wgpu on Windows.
     find_package(OpenGL REQUIRED)
     target_link_libraries(OpenDefocus PRIVATE
