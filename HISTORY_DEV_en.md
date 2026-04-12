@@ -2217,6 +2217,29 @@ Downstream `depthClip_->isConnected()` / `filterClip_->isConnected()` calls were
 #### OFX_architecture.md
 Updated to reflect v5 state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
 
+### 2026-04-13: Windows Toolchain Migration — Strawberry MinGW → MSYS2 UCRT64
+
+Migrated Windows build toolchain from Strawberry Perl's MinGW (GCC 13.2.0) to MSYS2 UCRT64 (GCC 15.2.0) for improved long-term maintainability.
+
+**Motivation:**
+- Strawberry Perl's MinGW is a C++ toolchain bundled as a Perl distribution accessory, with no independent maintenance plan
+- MSYS2 UCRT64 is an actively maintained Windows GNU environment with rolling GCC updates via pacman
+- GCC 15.2.0 provides better optimization, C++23 support, and more reliable COFF handling
+
+**Changes (`plugin/OpenDefocusOFX/CMakeLists.txt`):**
+- Removed `-Wa,-mbig-obj` workaround from WIN32 branch — no longer needed since protobuf-src is not compiled (system protoc via `protobuf-vendored` disable)
+- Removed `PATH` manipulation from `cmake -E env` — was causing Makefile parse errors due to Windows path semicolons expanding in Git Bash environment; cargo finds its own path via the inherited system PATH
+- Updated comments from "MinGW" to "MSYS2 UCRT64"
+
+**Build environment (new):**
+- MSYS2 UCRT64 GCC 15.2.0 (`C:/msys64/ucrt64/bin`)
+- `pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-make`
+- Build command: `PATH="/c/msys64/ucrt64/bin:$PATH" cmake ... && mingw32-make`
+
+**Build result:** 9.5 MB binary, GCC 15.2.0 (UCRT64)
+
+**Impact on Linux/macOS:** None.
+
 ### 2026-03-30: Windows UAT — v0.1.10-OFX-v5-dev
 
 Windows (MinGW build) UAT completed. No issues found.
