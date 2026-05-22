@@ -1,5 +1,12 @@
 # Changelog — OpenDefocus OFX
 
+## Unreleased
+
+### Build
+
+- **Windows: self-contained bundle**: The Windows `.ofx` now statically links libgcc / libstdc++ / libwinpthread. The bundle can be deployed to NUKE / Flame / Resolve hosts without installing MSYS2 UCRT64 runtimes. Binary size: 9.5 MB → 12.5 MB.
+- **Windows toolchain**: Migrated from Strawberry MinGW (GCC 13.2.0) to MSYS2 UCRT64 (GCC 15.2.0) for actively-maintained Windows GNU toolchain support.
+
 ## v0.1.10-OFX-v5 (2026-04-04)
 
 ### Performance Improvements

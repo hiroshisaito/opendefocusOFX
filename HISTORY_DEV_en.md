@@ -2240,6 +2240,36 @@ Migrated Windows build toolchain from Strawberry Perl's MinGW (GCC 13.2.0) to MS
 
 **Impact on Linux/macOS:** None.
 
+### 2026-05-23: Windows Static Runtime Linking
+
+Made the Windows `.ofx` bundle self-contained by statically linking the GCC C/C++ runtimes and winpthread.
+
+**Problem:**
+The MSYS2 UCRT64 build dynamically linked against MinGW runtime DLLs:
+- `libgcc_s_seh-1.dll`
+- `libstdc++-6.dll`
+
+These DLLs are not present on end-user host machines (NUKE / Flame / Resolve), so the plugin failed to load with "DLL not found" errors when the bundle was copied to a clean Windows machine without MSYS2 in PATH.
+
+**Fix (`plugin/OpenDefocusOFX/CMakeLists.txt`):**
+Added link options to the WIN32 branch:
+```cmake
+target_link_options(OpenDefocus PRIVATE
+    -static-libgcc
+    -static-libstdc++
+    -static)
+```
+
+**Verification (`objdump -p`):**
+- Before: `libgcc_s_seh-1.dll`, `libstdc++-6.dll` in import table
+- After: only Windows 10/11 system libraries (`KERNEL32.dll`, `ntdll.dll`, `api-ms-win-crt-*.dll` (UCRT), `OPENGL32.dll`, `bcryptprimitives.dll`)
+
+**Binary size:** 9.5 MB → 12.5 MB (+3.0 MB for statically-linked libstdc++).
+
+**Deployment:** The bundle (`bundle/OpenDefocusOFX.ofx.bundle/`) can now be copied directly to a Windows host without additional runtime installation.
+
+**Impact on Linux/macOS:** None.
+
 ### 2026-03-30: Windows UAT — v0.1.10-OFX-v5-dev
 
 Windows (MinGW build) UAT completed. No issues found.

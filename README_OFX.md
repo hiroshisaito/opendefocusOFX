@@ -37,11 +37,11 @@ The following are architectural adaptations to the OFX host environment. They do
 ### Prerequisites
 
 - **CMake** 3.20+
-- **C++17** compiler (GCC 8+ on Linux / Apple Clang 14+ on macOS / MinGW-W64 GCC 13+ on Windows)
+- **C++17** compiler (GCC 8+ on Linux / Apple Clang 14+ on macOS / MSYS2 UCRT64 GCC 15.2.0 on Windows)
 - **Rust** stable (1.92+) and the nightly toolchain listed in `upstream/opendefocus/crates/spirv-cli-build/rust-toolchain.toml`
 - **OpenFX SDK** — included as a git submodule (`upstream/openfx/`)
 - **OpenDefocus** — included as a git submodule (`upstream/opendefocus/`)
-- **Windows only**: System `protoc` (e.g. `winget install Google.Protobuf`), Rust GNU toolchain (`stable-x86_64-pc-windows-gnu`)
+- **Windows only**: MSYS2 UCRT64 environment (`pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-make`), system `protoc` (e.g. `winget install Google.Protobuf`), Rust GNU toolchain (`stable-x86_64-pc-windows-gnu`)
 
 ### Dependencies
 
@@ -67,13 +67,20 @@ cmake ../plugin/OpenDefocusOFX -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-#### Windows (MinGW)
+#### Windows (MSYS2 UCRT64)
+
+Run from the MSYS2 UCRT64 shell (or any shell with `C:\msys64\ucrt64\bin` in PATH):
 
 ```bash
 mkdir -p build && cd build
 cmake ../plugin/OpenDefocusOFX -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-mingw32-make -j%NUMBER_OF_PROCESSORS%
+mingw32-make -j$NUMBER_OF_PROCESSORS
 ```
+
+The Windows build statically links libgcc / libstdc++ / libwinpthread, so the
+resulting `.ofx` has no third-party DLL dependencies. Only Windows 10/11 system
+libraries are imported — the bundle can be deployed to host machines without
+installing MSYS2.
 
 The built plugin is automatically copied to the bundle directory:
 ```
