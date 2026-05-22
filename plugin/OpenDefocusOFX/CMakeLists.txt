@@ -136,6 +136,13 @@ elseif(WIN32)
     # Windows (MSYS2 UCRT64): Rust wgpu uses D3D12/Vulkan backends.
     # System libraries required by Rust std + wgpu on Windows.
     find_package(OpenGL REQUIRED)
+    # Statically link GCC/libstdc++/winpthread runtimes so the bundle does not
+    # depend on libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll being
+    # present on the end-user machine (NUKE / Flame / Resolve hosts).
+    target_link_options(OpenDefocus PRIVATE
+        -static-libgcc
+        -static-libstdc++
+        -static)
     target_link_libraries(OpenDefocus PRIVATE
         OfxSupport
         ${RUST_STATICLIB}
