@@ -1016,9 +1016,14 @@ pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdRe
         return OdResult::Ok;
     }
 
-    inst.settings.render.use_gpu_if_available = use_gpu;
-
+    // Probe with the requested mode using a temporary settings copy.  The
+    // canonical inst.settings.render.use_gpu_if_available is only updated
+    // after a successful probe so that a failed probe leaves the instance
+    // in a state consistent with the still-active renderer (gpu_failed
+    // also acts as a safety net, but avoiding the asymmetric write keeps
+    // the invariant simpler).
     let mut new_settings = inst.settings.clone();
+    new_settings.render.use_gpu_if_available = use_gpu;
     // wgpu device probe can panic on broken drivers; catch_unwind keeps the
     // panic from crossing the FFI boundary into the host.
     let probe_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1028,6 +1033,7 @@ pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdRe
     }));
     match probe_result {
         Ok(Ok(new_renderer)) => {
+            inst.settings.render.use_gpu_if_available = use_gpu;
             if use_gpu {
                 inst.gpu_failed = false; // reset failure flag on GPU re-enable
             }
@@ -1040,7 +1046,7 @@ pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdRe
         }
         Ok(Err(e)) => {
             log::error!("Failed to recreate renderer: {e}");
-            // Keep old renderer as fallback (if any)
+            // Keep old renderer + old setting as fallback (if any)
             OdResult::ErrorRenderFailed
         }
         Err(_) => {
@@ -1048,7 +1054,7 @@ pub unsafe extern "C" fn od_set_use_gpu(handle: OdHandle, use_gpu: bool) -> OdRe
             if use_gpu {
                 inst.gpu_failed = true; // mark GPU as failed so future calls fall back
             }
-            // Keep old renderer as fallback (if any)
+            // Keep old renderer + old setting as fallback (if any)
             OdResult::ErrorRenderFailed
         }
     }
@@ -1188,18 +1194,27 @@ pub unsafe extern "C" fn od_render(
         }
     }
 
-    // If GPU previously failed, recreate as CPU-only before attempting render
+    // If GPU previously failed, recreate as CPU-only before attempting render.
+    // wgpu CPU-adapter creation is unlikely to panic, but wrap in catch_unwind
+    // for symmetry with the other renderer-creation sites (HIGH #1 / #2).
     if inst.gpu_failed && inst.renderer.as_ref().map_or(false, |r| r.is_gpu()) {
         log::info!("GPU previously failed, recreating renderer as CPU-only");
         let mut cpu_settings = inst.settings.clone();
         cpu_settings.render.use_gpu_if_available = false;
-        match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
-            Ok(cpu_renderer) => {
+        let cpu_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings))
+        }));
+        match cpu_result {
+            Ok(Ok(cpu_renderer)) => {
                 inst.renderer = Some(cpu_renderer);
                 log::info!("CPU renderer created successfully");
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 log::error!("Failed to create CPU fallback renderer: {e}");
+                return OdResult::ErrorRenderFailed;
+            }
+            Err(_) => {
+                log::error!("od_render: caught panic during CPU fallback renderer creation");
                 return OdResult::ErrorRenderFailed;
             }
         }
@@ -1406,16 +1421,25 @@ pub unsafe extern "C" fn od_render(
                 }
                 inst.gpu_failed = true;
 
-                // Create CPU renderer
+                // Create CPU renderer (wrap in catch_unwind for symmetry with
+                // the GPU probe sites — CPU adapter creation rarely panics but
+                // a stray panic here would otherwise cross the FFI boundary).
                 let mut cpu_settings = inst.settings.clone();
                 cpu_settings.render.use_gpu_if_available = false;
-                match inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings)) {
-                    Ok(cpu_renderer) => {
+                let cpu_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    inst.runtime.block_on(opendefocus::OpenDefocusRenderer::new(false, &mut cpu_settings))
+                }));
+                match cpu_result {
+                    Ok(Ok(cpu_renderer)) => {
                         inst.renderer = Some(cpu_renderer);
                         log::info!("CPU fallback renderer created");
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         log::error!("Failed to create CPU fallback renderer: {e}");
+                        return OdResult::ErrorRenderFailed;
+                    }
+                    Err(_) => {
+                        log::error!("od_render: caught panic during CPU fallback renderer creation");
                         return OdResult::ErrorRenderFailed;
                     }
                 }

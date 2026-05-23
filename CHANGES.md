@@ -6,6 +6,8 @@
 
 - **FFI panic protection (HIGH #1)**: `ensure_renderer()` and `od_set_use_gpu()` now wrap the wgpu device probe in `catch_unwind`. A panic from broken GPU drivers no longer crosses the FFI boundary into the host.
 - **FFI panic protection (HIGH #2)**: All GPU stripes (not just the first) are now wrapped in `catch_unwind` with CPU fallback. Previously only the first GPU stripe was protected; a panic on stripe 2+ would have propagated to the host.
+- **FFI panic protection (LOW #1, symmetry)**: The two remaining CPU-renderer creation sites (lazy-init GPU-previously-failed path and stripe-loop CPU fallback) are now also wrapped in `catch_unwind`. CPU adapter creation rarely panics, but the wrap closes the last gap so every renderer-creation path on the bridge is protected.
+- **GPU toggle state consistency (LOW #2)**: `od_set_use_gpu()` no longer mutates `inst.settings.render.use_gpu_if_available` before the device probe. The canonical setting is now updated only after a successful probe, so a failed probe leaves the instance in a state consistent with the still-active renderer.
 
 ### Build
 

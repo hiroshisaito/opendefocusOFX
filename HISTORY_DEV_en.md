@@ -2310,6 +2310,18 @@ Third-pass static review by the review team identified two HIGH-severity gaps in
 2. **RoD non-negative origin invariant** at `OpenDefocusOFX.cpp:1006` — added inline comment documenting that `static_cast<int>(rod.x1 * renderScale)` truncates toward zero, so a host with a negative RoD origin would drift the RoD anchor by up to 1 px.  Currently safe on NUKE / Flame; re-validate when adding Resolve / Fusion to the host matrix.
 3. **macOS Intel deprecated-path deviation** at `plugin/OpenDefocusOFX/CMakeLists.txt:178-184` — added comment noting that Intel binaries ship to the OFX 1.5-deprecated `MacOS-x86-64/` directory pending universal-binary migration; strict OFX 1.5 hosts may fail to discover Intel until lipo-based output lands.
 
+#### Fix 3 (LOW #1, follow-up): CPU-renderer creation symmetry
+
+**Problem:** After the HIGH #1 / #2 hardening, two remaining CPU-renderer creation sites were still uncovered: (a) the lazy-init "GPU-previously-failed" path in `od_render` (lib.rs:~1196), and (b) the stripe-loop CPU fallback after a GPU panic (lib.rs:~1412).  CPU adapter creation rarely panics, but the asymmetry meant the bridge was not uniformly protected.
+
+**Fix:** Both sites now wrap `runtime.block_on(OpenDefocusRenderer::new(false, ...))` in `catch_unwind`.  A panic converts to `OdResult::ErrorRenderFailed`, matching the existing error-return contract.  Every renderer-creation path on the bridge is now panic-safe.
+
+#### Fix 4 (LOW #2, follow-up): GPU toggle state consistency
+
+**Problem:** `od_set_use_gpu()` set `inst.settings.render.use_gpu_if_available = use_gpu` *before* the wgpu probe.  When the probe failed, the canonical setting reflected the requested mode while the renderer state did not — the `gpu_failed` flag rescued the user-visible state (`od_is_gpu_active()` reads `is_gpu() && !gpu_failed`) but the internal invariant was asymmetric.
+
+**Fix:** The probe now runs against a temporary `new_settings` clone with the requested mode applied; `inst.settings.render.use_gpu_if_available` is updated only after a successful probe.  Probe failure leaves the canonical setting consistent with the still-active renderer.
+
 #### Items intentionally deferred
 
 - **HIGH #3** (global abort race) — fix requires upstream kernel API for per-instance abort.  Conflicts with the no-upstream-modification policy; kept in backlog as "Fine-grained abort Phase 2".
@@ -2328,7 +2340,7 @@ Third-pass static review by the review team identified two HIGH-severity gaps in
 - **Windows Support**: Complete; v5 used MinGW (Strawberry), v6-dev uses MSYS2 UCRT64 with static runtime linking
 - **P0 Stability Fixes**: Complete (per-instance abort, GPU toggle, depth fetch throttling)
 - **P1 Improvements**: Complete (lazy renderer init, draft render optimization, eContextFilter guard, failure logging)
-- **FFI Panic Protection**: Hardened in v6-dev — all GPU code paths (probe + every stripe) wrapped in `catch_unwind`
+- **FFI Panic Protection**: Hardened in v6-dev — every renderer-creation path (lazy-init, GPU toggle, lazy-init CPU fallback, stripe-loop CPU fallback) and every GPU stripe wrapped in `catch_unwind`
 - **Thread Safety**: eRenderUnsafe → eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`)
 - **Released version**: `v0.1.10-OFX-v5` (2026-04-04)
