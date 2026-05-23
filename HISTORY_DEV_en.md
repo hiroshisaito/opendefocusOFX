@@ -20,7 +20,7 @@ The ported version receives a `-OFX-v<revision>` suffix.
 - When only the OFX side is modified for the same original version, the revision is incremented
   - Example: OFX-side bug fix → `v0.1.10-OFX-v2`
 
-Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v5**
+Current target: **OpenDefocus v0.1.10** → Released **v0.1.10-OFX-v5**, dev **v0.1.10-OFX-v6-dev**
 
 ## Directory Structure
 
@@ -2217,6 +2217,24 @@ Downstream `depthClip_->isConnected()` / `filterClip_->isConnected()` calls were
 #### OFX_architecture.md
 Updated to reflect v5 state: lazy init, draft render, corrected clip fetch behavior, and macOS Focus Point overlay behavior.
 
+### 2026-03-30: Windows UAT — v0.1.10-OFX-v5-dev
+
+Windows (MinGW build) UAT completed. No issues found.
+
+- **Host**: Fusion Studio (Windows)
+- **Build**: `v0.1.10-OFX-v5-dev`, MinGW GCC 13.2.0, Rust stable-x86_64-pc-windows-gnu
+- **Result**: PASS — all tested scenarios passed without issues
+
+### 2026-04-04: v0.1.10-OFX-v5 Release
+
+Release complete.  Bundles generated for four platforms: Linux x86_64 / macOS arm64 / macOS x86_64 / Windows x86_64.
+
+**Changes shipped in v5:**
+- P1-3.3: Lazy renderer initialization
+- P1-3.6: Interactive/draft render optimization (OFX 1.4 forward compatibility)
+- eContextFilter clip guard
+- Failure logging (`od_create` / `render` / `od_render` — 3 paths)
+
 ### 2026-04-13: Windows Toolchain Migration — Strawberry MinGW → MSYS2 UCRT64
 
 Migrated Windows build toolchain from Strawberry Perl's MinGW (GCC 13.2.0) to MSYS2 UCRT64 (GCC 15.2.0) for improved long-term maintainability.
@@ -2270,29 +2288,58 @@ target_link_options(OpenDefocus PRIVATE
 
 **Impact on Linux/macOS:** None.
 
-### 2026-03-30: Windows UAT — v0.1.10-OFX-v5-dev
+### 2026-05-24: Post-v5 Review Fixes — FFI Panic Protection Hardening
 
-Windows (MinGW build) UAT completed. No issues found.
+Third-pass static review by the review team identified two HIGH-severity gaps in the FFI panic-protection coverage that were introduced by the v5 lazy-init refactor.  The implementation team verified the findings and the user approved the fix scope.
 
-- **Host**: Fusion Studio (Windows)
-- **Build**: `v0.1.10-OFX-v5-dev`, MinGW GCC 13.2.0, Rust stable-x86_64-pc-windows-gnu
-- **Result**: PASS — all tested scenarios passed without issues
+#### Fix 1 (HIGH #1): wgpu device-probe panic protection
+
+**Problem:** v5's `ensure_renderer()` (lazy-init path) and `od_set_use_gpu()` (GPU toggle path) call `OpenDefocusRenderer::new()`, which probes the wgpu device.  On broken Vulkan / Metal drivers this probe can panic.  Neither call site was wrapped in `catch_unwind`, so a probe panic propagated across the FFI boundary into the host.
+
+**Fix:** Both call sites now wrap the `runtime.block_on(OpenDefocusRenderer::new(...))` call in `std::panic::catch_unwind(AssertUnwindSafe(...))`.  Probe failure converts to `OdResult::ErrorInitFailed` (lazy-init) or `OdResult::ErrorRenderFailed` + `gpu_failed = true` (toggle), matching the existing error-return contract.
+
+#### Fix 2 (HIGH #2): all-stripe GPU panic protection
+
+**Problem:** v5 wrapped only the first GPU stripe in `catch_unwind`, gated by a `is_first_gpu_stripe` flag.  Subsequent GPU stripes ran unprotected — a panic on stripe 2+ propagated to the host.
+
+**Fix:** Replaced the `is_first_gpu_stripe` flag with a per-stripe `inst.renderer.is_gpu() && !inst.gpu_failed` check.  All GPU stripes are now wrapped; CPU stripes remain unwrapped (safe-Rust panic = invariant violation, abort with full trace is preferred over swallowing).  The existing CPU-fallback retry path is reused for whichever stripe first triggers the GPU failure.
+
+#### Documentation fixes
+
+1. **Stale comment** at `OpenDefocusOFX.cpp:1050-1052` — referenced "fetchWindow X may have been trimmed to cap bufWidth", but X-axis trimming was removed in v4.  Rewritten to describe the actual invariant (`fetchWindow.x1/x2 == rw.x1/x2`) and note that the overscan branches are defensive dead code.
+2. **RoD non-negative origin invariant** at `OpenDefocusOFX.cpp:1006` — added inline comment documenting that `static_cast<int>(rod.x1 * renderScale)` truncates toward zero, so a host with a negative RoD origin would drift the RoD anchor by up to 1 px.  Currently safe on NUKE / Flame; re-validate when adding Resolve / Fusion to the host matrix.
+3. **macOS Intel deprecated-path deviation** at `plugin/OpenDefocusOFX/CMakeLists.txt:178-184` — added comment noting that Intel binaries ship to the OFX 1.5-deprecated `MacOS-x86-64/` directory pending universal-binary migration; strict OFX 1.5 hosts may fail to discover Intel until lipo-based output lands.
+
+#### Items intentionally deferred
+
+- **HIGH #3** (global abort race) — fix requires upstream kernel API for per-instance abort.  Conflicts with the no-upstream-modification policy; kept in backlog as "Fine-grained abort Phase 2".
+- **HIGH #7** (macOS universal binary) — deferred to next major release.
+- **HIGH #6** (CMake `BYPRODUCTS`) — queued for next revision (cosmetic Ninja warning only).
+- **M9** (`Cargo.lock` tracking) — queued for next revision.
+
+#### kDevVersion
+
+`v0.1.10-OFX-v6-dev`
 
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
 - **macOS Support**: Complete, v0.1.10-OFX-v3 released (Linux + macOS)
-- **Windows Support**: Complete, UAT passed (Fusion Studio, v5-dev)
+- **Windows Support**: Complete; v5 used MinGW (Strawberry), v6-dev uses MSYS2 UCRT64 with static runtime linking
 - **P0 Stability Fixes**: Complete (per-instance abort, GPU toggle, depth fetch throttling)
 - **P1 Improvements**: Complete (lazy renderer init, draft render optimization, eContextFilter guard, failure logging)
+- **FFI Panic Protection**: Hardened in v6-dev — all GPU code paths (probe + every stripe) wrapped in `catch_unwind`
 - **Thread Safety**: eRenderUnsafe → eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`)
-- **Current dev version**: `v0.1.10-OFX-v5-dev`
+- **Released version**: `v0.1.10-OFX-v5` (2026-04-04)
+- **Current dev version**: `v0.1.10-OFX-v6-dev`
 
 ### Next Steps
 
-1. **v0.1.10-OFX-v5 release**: Windows + P1 improvements
-2. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
-3. **Open test feedback**: Monitor and respond to tester reports
-4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
-5. **GPU toggle state feedback** (backlog): When `od_set_use_gpu()` fails, settings and actual renderer state diverge; consider UI feedback or settings rollback
+1. **v0.1.10-OFX-v6 release planning**: Bundles Windows MSYS2 UCRT64 toolchain, Windows static runtime linking, and post-v5 FFI panic hardening
+2. **Next-revision items**: M9 (Cargo.lock tracking), HIGH #6 (CMake `BYPRODUCTS`)
+3. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
+4. **Open test feedback**: Monitor and respond to tester reports
+5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+6. **GPU toggle state feedback** (backlog): When `od_set_use_gpu()` fails, settings and actual renderer state diverge; consider UI feedback or settings rollback
+7. **macOS universal binary** (next major): lipo-based output to satisfy OFX 1.5 spec-strict hosts

@@ -176,6 +176,11 @@ else()
 endif()
 
 # --- Bundle installation ---
+# NOTE: OFX 1.5 deprecated `MacOS-x86-64`/`MacOS` per-arch paths in favor of a
+# single universal `MacOS/` directory.  Intel binaries currently ship to the
+# deprecated `MacOS-x86-64` path pending universal binary migration in the next
+# major release; NUKE / Flame still resolve both paths.  Strict OFX 1.5 hosts
+# may fail to discover the Intel build until lipo-based universal output lands.
 if(APPLE)
     if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
         set(ARCHDIR "MacOS-x86-64")

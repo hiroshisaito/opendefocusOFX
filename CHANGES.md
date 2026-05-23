@@ -2,10 +2,21 @@
 
 ## Unreleased
 
+### Stability
+
+- **FFI panic protection (HIGH #1)**: `ensure_renderer()` and `od_set_use_gpu()` now wrap the wgpu device probe in `catch_unwind`. A panic from broken GPU drivers no longer crosses the FFI boundary into the host.
+- **FFI panic protection (HIGH #2)**: All GPU stripes (not just the first) are now wrapped in `catch_unwind` with CPU fallback. Previously only the first GPU stripe was protected; a panic on stripe 2+ would have propagated to the host.
+
 ### Build
 
 - **Windows: self-contained bundle**: The Windows `.ofx` now statically links libgcc / libstdc++ / libwinpthread. The bundle can be deployed to NUKE / Flame / Resolve hosts without installing MSYS2 UCRT64 runtimes. Binary size: 9.5 MB → 12.5 MB.
 - **Windows toolchain**: Migrated from Strawberry MinGW (GCC 13.2.0) to MSYS2 UCRT64 (GCC 15.2.0) for actively-maintained Windows GNU toolchain support.
+
+### Documentation
+
+- Documented the non-negative RoD origin invariant assumed by `static_cast<int>` truncation (NUKE / Flame only; re-validate when adding Resolve / Fusion).
+- Documented the macOS Intel deprecated-path deviation (Intel ships to `MacOS-x86-64` pending universal binary migration in the next major release).
+- Removed stale comment about fetchWindow X-axis trimming (no longer applicable after the X-overscan removal in v4).
 
 ## v0.1.10-OFX-v5 (2026-04-04)
 
