@@ -515,6 +515,124 @@ Test environment: Flame (Linux)
 
 ---
 
+## 38. v0.1.10-OFX-v6-dev UAT — FFI Panic Protection Hardening + GPU Toggle State Consistency
+
+Test environment: NUKE / Flame (Linux); additional optional: NUKE (macOS arm64 / x86_64)
+
+**Scope:**
+Focused on the code paths changed since v5.  Not a full feature re-run — this cycle validates the `catch_unwind` coverage and the GPU-toggle state machine invariant, and screens for regressions in existing functionality.
+
+**v6-dev changes covered:**
+- HIGH #1: `catch_unwind` protection around the wgpu device probe in `ensure_renderer()` / `od_set_use_gpu()`
+- HIGH #2: `catch_unwind` protection around every GPU stripe (the `is_first_gpu_stripe` flag was removed)
+- LOW #1: `catch_unwind` protection around the lazy-init "GPU previously failed" path and the stripe-loop CPU fallback creation
+- LOW #2: `od_set_use_gpu` no longer mutates `use_gpu_if_available` before the probe — the canonical setting is updated only after a successful probe
+
+**Prerequisite:** Confirm the `kDevVersion` display reads `v0.1.10-OFX-v6-dev` before starting.  The `-dev` suffix is dropped only after this UAT passes.
+
+### 38.1 Plugin Load & Health Check
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.1.1 | Plugin loads in NUKE / Flame (Linux) | | OpenDefocusOFX appears in the Defocus menu with no error log |
+| 38.1.2 | kDevVersion displayed | | Top of Controls page shows `v0.1.10-OFX-v6-dev` |
+| 38.1.3 | Node creation speed (lazy-init effect) | | Ten consecutive node creations feel instant (no wgpu probe) |
+
+### 38.2 Lazy Initialization (HIGH #1)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.2.1 | Lazy init fires on the first render | | `Lazy-initializing renderer (GPU=true)` log appears |
+| 38.2.2 | No re-init on subsequent renders | | After a parameter change, the `Lazy-initializing` log does not appear again |
+| 38.2.3 | Node created with UseGPU=false → first render | | `Lazy-initializing renderer (GPU=false)` log; CPU renderer is created |
+
+### 38.3 GPU / CPU Basic Rendering (Regression)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.3.1 | HD GPU render (1920×1080, Size=50) | | Pixel-identical to v5 (A/B compare) |
+| 38.3.2 | UHD GPU render (3840×2160) | | Passes through multiple stripes with no seams |
+| 38.3.3 | UHD CPU render (UseGPU=false) | | Output is correct |
+| 38.3.4 | 5K+ GPU render (5120×2700+) | | Many stripes traversed, no crash |
+
+### 38.4 GPU Toggle State Consistency (LOW #2 focus)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.4.1 | GPU on → off → on cycle | | Each toggle logs `Renderer recreated: GPU/CPU`; output is correct |
+| 38.4.2 | UseGPU toggled during loop playback | | Playback continues; new mode applies from the next frame |
+| 38.4.3 | GPU state feedback consistency | | UI display (DeviceName, etc.) matches the actual renderer state |
+| 38.4.4 | Toggle stress (10 consecutive toggles) | | All toggles succeed; no memory leak (create/destroy a node 10 times while watching memory) |
+
+### 38.5 Stripe Rendering (HIGH #2 path)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.5.1 | Quality=Low / Medium / High (UHD) | | No seams at any quality |
+| 38.5.2 | Position-dependent effects across stripes | | Catseye Amount=2.0 / Barndoors Amount=1.0 / Astigmatism — no boundary seams |
+| 38.5.3 | Depth mode + stripes (UHD) | | Depth defocus is consistent across all stripes when FocalPlaneSetup varies |
+| 38.5.4 | Proxy mode (1/2, 1/4) | | renderScale applied; output correct |
+
+### 38.6 GPU → CPU Fallback (HIGH #2 + LOW #1)
+
+Hard to trigger in normal operation.  Run the items that are reachable; mark the others N/A.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.6.1 | Explicit CPU lazy init (UseGPU=false) | | `Lazy-initializing renderer (GPU=false)` → CPU created, no error |
+| 38.6.2 | GPU-previously-failed path | | Mark N/A if unreachable.  When it fires: `GPU previously failed, recreating renderer as CPU-only` log, CPU completes the render |
+| 38.6.3 | Mid-stripe CPU fallback | | Mark N/A if unreachable.  When it fires: `GPU stripe render ... — switching to CPU` log → remaining stripes complete on CPU with no seams |
+
+### 38.7 Parallel Instance Rendering (Regression)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.7.1 | Two parallel instances (Branch + Comp) | | No cross-contamination |
+| 38.7.2 | Per-instance abort isolation | | Aborting one instance does not propagate to the other (per-instance abort behavior) |
+
+### 38.8 eContextFilter Guard (continued from v5)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.8.1 | eContextGeneral normal operation (Depth clip connected / unconnected) | | Works normally; no context-related errors |
+| 38.8.2 | eContextFilter context | | NUKE / Flame do not use Filter context, so this is effectively a regression check |
+
+### 38.9 Log Monitoring Points
+
+Expected logs (success path):
+```
+[INFO] Lazy-initializing renderer (GPU=true)
+[INFO] Renderer created: GPU
+[INFO] Renderer recreated: GPU/CPU
+```
+
+Watch-out logs (should not appear; record details if they do):
+```
+[ERROR] ensure_renderer: caught panic during renderer init
+[ERROR] od_set_use_gpu: caught panic during renderer recreation
+[ERROR] GPU stripe render panicked
+[ERROR] od_render: caught panic during CPU fallback renderer creation
+```
+If any appear → `catch_unwind` worked correctly (crash avoided), but the underlying driver / host condition still needs investigation.
+
+### 38.10 PASS Criteria
+
+- 38.1 – 38.5, 38.7, 38.8: **all items must PASS** (any regression blocks the v6 release)
+- 38.6: 38.6.1 must PASS; 38.6.2 / 38.6.3 may be N/A (environment-dependent)
+- If any watch-out log appears, hold the verdict and investigate
+
+### 38.11 Common Prep
+
+1. Place the v6-dev bundle under `bundle/OpenDefocusOFX.ofx.bundle/`
+2. Configure the plugin path (Flame: `/opt/Autodesk/sw_app_<version>/usr/.../OFX/`; NUKE: `~/.nuke/OFX/Plugins/`)
+3. Enable log output before launching the host
+   - Flame: `tail -f /opt/Autodesk/log/Flame_*.log`
+   - NUKE: launch from a terminal and watch stderr
+4. At the start of each session, confirm `v6-dev` via 38.1.2 (kDevVersion display)
+5. Keep the v5 bundle at a separate path for A/B comparison renders
+
+---
+
 ## FAIL Item Summary (Phase 2 UAT)
 
 | # | Item | Category | Status |
