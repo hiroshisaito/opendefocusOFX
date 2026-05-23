@@ -1,4 +1,4 @@
-# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v4
+# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v6-dev
 
 ## Test Environment
 
@@ -630,6 +630,74 @@ If any appear → `catch_unwind` worked correctly (crash avoided), but the under
    - NUKE: launch from a terminal and watch stderr
 4. At the start of each session, confirm `v6-dev` via 38.1.2 (kDevVersion display)
 5. Keep the v5 bundle at a separate path for A/B comparison renders
+
+---
+
+## 39. v0.1.10-OFX-v6-dev UAT — Windows MSYS2 UCRT64 Toolchain + Static Runtime
+
+Test environment:
+- Windows 11 (development PC with MSYS2 UCRT64 installed)
+- Windows 11 (clean PC with neither MSYS2 nor Strawberry MinGW installed)
+- Linux Rocky 8.10 (regression only)
+- macOS 15.7 Intel (regression only)
+- Hosts: NUKE 16.0, Fusion Studio
+
+**Scope:**
+- Toolchain migration (Strawberry MinGW GCC 13.2.0 → MSYS2 UCRT64 GCC 15.2.0)
+- Static runtime linking (libgcc / libstdc++ / libwinpthread)
+- Bundle self-containment and Windows-side behavioral regression
+
+**v6-dev changes covered:**
+- commit `9606b5c`: Windows toolchain → MSYS2 UCRT64 GCC 15.2.0
+- commit `3737545`: `-static-libgcc -static-libstdc++ -Wl,-Bstatic,-lwinpthread` for static linking
+
+**Prerequisite:** Confirm the Windows build is `v0.1.10-OFX-v6-dev` and the bundle size is approximately 12.5 MB (v5 + 3 MB) before starting.
+
+### 39.1 Windows Bundle Self-Containment
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.1.1 | Bundle is recognized on a clean Windows 11 PC | | NUKE / Fusion load the plugin on a machine with neither MSYS2 nor Strawberry MinGW installed |
+| 39.1.2 | Bundle size ~12.5 MB | | About +3 MB from v5 (rough indicator that static linking took effect) |
+| 39.1.3 | `dumpbin /dependents` shows no libgcc / libstdc++ / libwinpthread DLL dependencies | | Verifies static linking. Use `dumpbin` or Dependency Walker |
+
+### 39.2 Windows Rendering Regression (NUKE)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.2.1 | 2D mode render completes normally | | Output matches v5 (Strawberry MinGW) |
+| 39.2.2 | Depth mode render completes normally | | Output matches v5 |
+| 39.2.3 | GPU render completes normally (2D / Depth / UHD) | | GCC 15 + wgpu integration confirmed |
+| 39.2.4 | Write-node batch render (24 frames) completes | | No thread-safety regression |
+| 39.2.5 | No crash on NUKE shutdown | | No destruction-order issues from static linking |
+
+### 39.3 Windows Rendering Regression (Fusion Studio)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.3.1 | Basic 2D / Depth / GPU rendering | | Output matches v5 |
+| 39.3.2 | No crash on Fusion shutdown | | |
+
+### 39.4 Other OS Regression (Toolchain Change Impact)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.4.1 | Linux Rocky 8.10: spot-check primary scenarios through Phase 37 | | Toolchain change has no impact on Linux build |
+| 39.4.2 | macOS Intel: spot-check primary scenarios | | Toolchain change has no impact on macOS build |
+
+### 39.5 PASS Criteria
+
+- 39.1 / 39.2: **all items must PASS** (especially 39.1.1 / 39.1.3 — v6 release blockers)
+- 39.3: all items must PASS (any FAIL in Fusion Studio holds the verdict)
+- 39.4: PASS if behavior matches v5 (spot-check is sufficient)
+
+### 39.6 Common Prep
+
+1. Build the Windows v6-dev bundle on the development PC (`cargo build --release` → CMake)
+2. Copy the ~12.5 MB bundle to a clean Windows 11 PC (USB / shared folder, etc.)
+3. Run `dumpbin /dependents OpenDefocusOFX.ofx` on the clean PC (requires Visual Studio Build Tools or Windows SDK)
+4. Launch NUKE / Fusion on the clean PC with log output enabled
+5. Keep the v5 bundle in parallel for A/B comparison renders
 
 ---
 
