@@ -5,7 +5,7 @@
 A project to port OpenDefocus (a Rust-based convolution library) from a Nuke NDK plugin to an OpenFX plugin.
 
 - Project root: `/Volumes/RAID/develop/ofx/oepndefocus_ofx`
-- Primary development platform: Rocky Linux 8.10 (x86_64)
+- Primary development platform: Rocky Linux 9.5 (x86_64) (Rocky Linux 8.10 through v0.1.10-OFX-v5)
 - macOS support added in Phase E (macOS 15.7 Sequoia, Intel x86_64)
 
 ## Version Management Rules

@@ -6,7 +6,7 @@
 |------|---------|
 | OFX Plugin | `bundle/OpenDefocusOFX.ofx.bundle/Contents/<arch>/OpenDefocusOFX.ofx` |
 | Reference | OpenDefocus Nuke NDK v0.1.10 |
-| OS (Linux) | Rocky Linux 8.10 (x86_64) |
+| OS (Linux) | Rocky Linux 9.5 (x86_64) |
 | OS (macOS) | macOS 15.7 Sequoia (Intel x86_64) — Phase E |
 | OFX Host | NUKE 16.0, Flame 2026 |
 | Test Date | Feb 25 2026 |
@@ -638,7 +638,7 @@ If any appear → `catch_unwind` worked correctly (crash avoided), but the under
 Test environment:
 - Windows 11 (development PC with MSYS2 UCRT64 installed)
 - Windows 11 (clean PC with neither MSYS2 nor Strawberry MinGW installed)
-- Linux Rocky 8.10 (regression only)
+- Linux Rocky 9.5 (regression only)
 - macOS 15.7 Intel (regression only)
 - Hosts: NUKE 16.0, Fusion Studio
 
@@ -682,7 +682,7 @@ Test environment:
 
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 39.4.1 | Linux Rocky 8.10: spot-check primary scenarios through Phase 37 | | Toolchain change has no impact on Linux build |
+| 39.4.1 | Linux Rocky 9.5: spot-check primary scenarios through Phase 37 | | Dual baseline: Windows-toolchain regression check AND Rocky 8.10 → 9.5 dev/test OS migration regression check (prior phases were tested on 8.10) |
 | 39.4.2 | macOS Intel: spot-check primary scenarios | | Toolchain change has no impact on macOS build |
 
 ### 39.5 PASS Criteria
