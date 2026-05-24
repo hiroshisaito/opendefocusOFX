@@ -16,7 +16,7 @@
 
 ### Compatibility
 
-- **Fusion Studio (Linux standalone) load failure resolved (Known Issue #26)**: Exported a no-op `OfxSetHost` stub. The OFX 1.5 spec marks this entry point as optional and the C++ Support library does not provide it, but standalone Fusion Studio Linux's plugin loader treats its absence as fatal (`undefined symbol: OfxSetHost`). The stub returns `kOfxStatReplyDefault` and does not alter the load path for NUKE / Flame / DaVinci Resolve — host capture still flows through `OfxPlugin::setHost`. The symbol is given explicit `default` visibility to override the bundle-wide `-fvisibility=hidden`.
+- **Fusion Studio (Linux standalone) load failure resolved (Known Issue #26)**: Exported a no-op `OfxSetHost` stub. The OFX 1.5 spec marks this entry point as optional and the C++ Support library does not provide it, but standalone Fusion Studio Linux's plugin loader treats its absence as fatal (`undefined symbol: OfxSetHost`). The stub returns `kOfxStatOK` and does not alter the load path for NUKE / Flame / DaVinci Resolve — host capture still flows through `OfxPlugin::setHost`. The symbol is given explicit `default` visibility to override the bundle-wide `-fvisibility=hidden`.
 
 ### Documentation
 

@@ -2345,7 +2345,7 @@ OFX 1.5 spec lists `OfxSetHost` as an *optional* C entry point — NUKE / Flame 
 ```cpp
 extern "C" __attribute__((visibility("default")))
 OfxStatus OfxSetHost(const OfxHost* /*host*/) {
-    return kOfxStatReplyDefault;
+    return kOfxStatOK;
 }
 ```
 
@@ -2353,12 +2353,17 @@ Notes:
 - `OfxExport` is `#define OfxExport extern` on Linux and does not add a visibility attribute; the bundle is built with `-fvisibility=hidden`, so an explicit `default` visibility is required (matching the `EXPORT` macro used by the Support library for `OfxGetNumberOfPlugins` / `OfxGetPlugin`).
 - A `_WIN32` branch uses `__declspec(dllexport)` to keep the symbol visible on the MSYS2 UCRT64 build.
 - The C++ Support library's host capture (`OfxPlugin::setHost = OFX::Private::setHost` in `ofxsImageEffect.cpp:3026`) is unchanged.  OFX 1.5 spec orders the calls as: (1) `OfxSetHost`, (2) `OfxGetNumberOfPlugins`, (3) `OfxGetPlugin`, (4) `OfxPlugin::setHost`.  Step (4) still runs on every host, so the canonical wiring is preserved on NUKE / Flame / Resolve.
+- Return value is `kOfxStatOK` (the conventional success return for entry points).  The original draft used `kOfxStatReplyDefault`, but two independent external reviews flagged this as the only Flame-side ambiguity — `ofxCore.h` documents `kOfxStatReplyDefault` primarily for mainEntry actions, which could give a strict host room to reject a non-OK return from `OfxSetHost`.  `kOfxStatOK` removes that interpretive risk at zero implementation cost.
 
 **Verification:**
 - `nm -D --defined-only ...` confirms `T OfxSetHost` is now in the dynamic symbol table.
 - UAT must verify on standalone Fusion Studio Linux (load + render) AND confirm no regression on NUKE / Flame / Resolve.
 
 **Known Issue #26 status:** Promoted from `DEFERRED` to `RESOLVED (pending Fusion Studio Linux UAT)`.
+
+**Follow-up actions:**
+- **BMD upstream bug report**: File a Fusion Studio Linux defect against BMD citing OFX 1.5 spec (`OfxSetHost` is optional per `ofxLoadingSequence.rst:10` and `relnotes-1.5.rst:44`) and attach the `LD_DEBUG=files` trace.  Resolution would let downstream OFX plugins drop the stub; until then the shim is the cheapest interim fix.  TODO: filed by [date / by whom — to record].
+- **KI#27 candidate — second-shoe-drops sweep**: One `LD_DEBUG=symbols` run against Fusion Studio Linux loading the current plugin to confirm no *other* OFX 1.5 optional symbol triggers the same "fatal on absence" behavior.  If any do, decide stub-vs-skip per symbol.
 
 #### kDevVersion
 

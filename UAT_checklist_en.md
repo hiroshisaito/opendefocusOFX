@@ -753,16 +753,38 @@ The OFX 1.5 spec call order is: (1) OfxSetHost → (2) OfxGetNumberOfPlugins →
 | 40.4.1 | Resolve Studio: loads in the Fusion Page | | The path that already worked still works |
 | 40.4.2 | Resolve Studio: basic render in the Fusion Page | | Output matches v5 |
 
-### 40.5 PASS Criteria
+### 40.5 macOS Host Regression (KI#26 inverse check)
+
+Fusion Studio on macOS was recorded as "already loading correctly" in the KI#26 history.  This sub-section confirms that the macOS load path is not regressed.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.5.1 | NUKE macOS arm64 / x86_64: load + basic render | | Pixel-identical to v5 |
+| 40.5.2 | Fusion Studio macOS: loads (retention of previously working path) | | Retention check for the path KI#26 recorded as already OK |
+| 40.5.3 | Resolve Studio macOS: loads + basic render in the Fusion Page | | Existing path preserved |
+
+### 40.6 Windows Host Regression
+
+Right after the MSYS2 UCRT64 toolchain migration, confirm that the `_WIN32` branch (`__declspec(dllexport)`) works correctly.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.6.1 | NUKE Windows: load + basic render | | Pixel-identical to v5 (Strawberry MinGW) |
+| 40.6.2 | Fusion Studio Windows: load + basic render | | Also confirms the Windows Fusion loader behavior |
+| 40.6.3 | `dumpbin /exports OpenDefocusOFX.ofx` lists OfxSetHost | | `OfxSetHost` appears alongside `OfxGetNumberOfPlugins` / `OfxGetPlugin` |
+
+### 40.7 PASS Criteria
 
 - 40.1: **all items must PASS** (evidence that Known Issue #26 is resolved)
 - 40.2: **all items must PASS** (confirms Fusion Studio Linux is now usable)
-- 40.3: **all items must PASS** (no impact on Flame / NUKE — v6 release blocker)
+- 40.3: **all items must PASS** (no impact on Flame / NUKE Linux — v6 release blocker)
 - 40.4: **all items must PASS** (preserves the previously working Resolve Studio path)
+- 40.5: **all items must PASS** (no regression on macOS paths)
+- 40.6: **all items must PASS** (no regression on the Windows build path)
 
-If anything in 40.3 fails, the OfxSetHost stub must be reverted or made conditional, blocking the v6 release.
+If anything in 40.3 / 40.5 / 40.6 fails, the OfxSetHost stub must be reverted or made conditional, blocking the v6 release.
 
-### 40.6 Common Prep
+### 40.8 Common Prep
 
 1. Confirm the v6-dev bundle has been produced at `bundle/OpenDefocusOFX.ofx.bundle/`
 2. Install: `sudo cp -R '/path/to/bundle/OpenDefocusOFX.ofx.bundle' /usr/OFX/Plugins/` (recommend removing the existing v5 bundle first)
@@ -770,6 +792,7 @@ If anything in 40.3 fails, the OfxSetHost stub must be reverted or made conditio
 4. Fusion Studio: `/opt/BlackmagicDesign/Fusion20/Fusion`
 5. NUKE / Flame: default paths
 6. DaVinci Resolve Studio: launch normally, then switch to the Fusion Page
+7. macOS / Windows rows require validation on separate environments (remote PC or hardware swap)
 
 ---
 

@@ -2194,7 +2194,11 @@ void getPluginIDs(OFX::PluginFactoryArray& ids) {
 // Defining this does NOT change the load path on other hosts: per OFX 1.5
 // spec the host still calls OfxPlugin::setHost after OfxGetPlugin returns,
 // so the C++ Support library's host capture remains the canonical wiring.
-// kOfxStatReplyDefault signals "function ran normally, no action taken".
+// kOfxStatOK signals "entry point completed normally" — the conventional
+// success return for OFX entry points.  (kOfxStatReplyDefault was avoided
+// because ofxCore.h documents it primarily for mainEntry actions, which
+// could leave room for a strict host to reject the plugin on a non-OK
+// return; external review flagged this as the only Flame-side ambiguity.)
 //
 // Note: `OfxExport` is `#define OfxExport extern` on Linux and does not
 // add visibility attributes; the bundle is built with -fvisibility=hidden,
@@ -2204,10 +2208,10 @@ void getPluginIDs(OFX::PluginFactoryArray& ids) {
 // ---------------------------------------------------------------------------
 #if defined(_WIN32)
 extern "C" __declspec(dllexport) OfxStatus OfxSetHost(const OfxHost* /*host*/) {
-    return kOfxStatReplyDefault;
+    return kOfxStatOK;
 }
 #else
 extern "C" __attribute__((visibility("default"))) OfxStatus OfxSetHost(const OfxHost* /*host*/) {
-    return kOfxStatReplyDefault;
+    return kOfxStatOK;
 }
 #endif
