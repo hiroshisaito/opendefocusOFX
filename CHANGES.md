@@ -16,7 +16,13 @@
 
 ### Compatibility
 
-- **Fusion Studio (Linux standalone) load failure resolved (Known Issue #26)**: Exported a no-op `OfxSetHost` stub. The OFX 1.5 spec marks this entry point as optional and the C++ Support library does not provide it, but standalone Fusion Studio Linux's plugin loader treats its absence as fatal (`undefined symbol: OfxSetHost`). The stub returns `kOfxStatOK` and does not alter the load path for NUKE / Flame / DaVinci Resolve — host capture still flows through `OfxPlugin::setHost`. The symbol is given explicit `default` visibility to override the bundle-wide `-fvisibility=hidden`.
+- **Fusion Studio (Linux standalone) load failure resolved (Known Issue #26)**: Two-stage fix.
+  - **Stage 1 — OfxSetHost stub.** OFX 1.5 marks this entry point as optional and the C++ Support library does not provide it, but standalone Fusion Studio Linux's loader treats its absence as fatal (`undefined symbol: OfxSetHost`).  A no-op stub returning `kOfxStatOK` resolves the symbol-resolution failure.  The stub gets explicit `default` visibility to override the bundle-wide `-fvisibility=hidden`.
+  - **Stage 2 — visibility leak fix.** Stage 1 alone was insufficient: Fusion's loader also rejected the bundle on a second, silent grounds.  The `.ofx` was leaking ~2700 symbols (OFX Support library `OFX::*`, libstdc++ `std::__cxx11::*`, and the Rust FFI bridge's `od_*` exports) because (a) the OFX Support static library was compiled without `-fvisibility=hidden`, and (b) Rust `extern "C"` exports default to public visibility.  Two changes restore parity with plugins Fusion already accepts (smooth.ofx exports only 3 symbols):
+    - `CXX_VISIBILITY_PRESET hidden` added to the `OfxSupport` static-library target.
+    - A linker version script (`plugin/OpenDefocusOFX/OpenDefocusOFX.exports`) is wired into the Linux link line; only `OfxGetNumberOfPlugins`, `OfxGetPlugin`, and `OfxSetHost` remain in the dynamic symbol table.  Windows PE/COFF only exports `__declspec(dllexport)` symbols by default, so no version script is needed there.
+  - **Verified on Linux**: Fusion Studio loads + renders normally; NUKE, Flame, and DaVinci Resolve Studio (Fusion Page + Color Page) are pixel-identical to v5.  macOS and Windows hosts remain to be UAT'd on the respective platforms before the v6 release.
+  - **Bundle export profile**: 2725 → 3 dynamic `T` exports; binary size −370 KB from removed export metadata.
 
 ### Documentation
 

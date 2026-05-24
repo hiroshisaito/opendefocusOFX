@@ -2359,11 +2359,59 @@ Notes:
 - `nm -D --defined-only ...` confirms `T OfxSetHost` is now in the dynamic symbol table.
 - UAT must verify on standalone Fusion Studio Linux (load + render) AND confirm no regression on NUKE / Flame / Resolve.
 
-**Known Issue #26 status:** Promoted from `DEFERRED` to `RESOLVED (pending Fusion Studio Linux UAT)`.
+**Known Issue #26 status (initial assessment):** Promoted from `DEFERRED` to `RESOLVED (pending Fusion Studio Linux UAT)`.
 
 **Follow-up actions:**
 - **BMD upstream bug report**: File a Fusion Studio Linux defect against BMD citing OFX 1.5 spec (`OfxSetHost` is optional per `ofxLoadingSequence.rst:10` and `relnotes-1.5.rst:44`) and attach the `LD_DEBUG=files` trace.  Resolution would let downstream OFX plugins drop the stub; until then the shim is the cheapest interim fix.  TODO: filed by [date / by whom — to record].
 - **KI#27 candidate — second-shoe-drops sweep**: One `LD_DEBUG=symbols` run against Fusion Studio Linux loading the current plugin to confirm no *other* OFX 1.5 optional symbol triggers the same "fatal on absence" behavior.  If any do, decide stub-vs-skip per symbol.
+
+### 2026-05-25: KI#26 Stage 2 — Visibility Leak Fix
+
+The Stage 1 OfxSetHost stub above turned out to be necessary but not sufficient.  When the user retested Fusion Studio Linux with the new bundle, the same generic "failed to load" dialog appeared, but `LD_DEBUG=files` showed a different shape: `dlopen` succeeded, `init` was called, and then Fusion immediately called `fini` and unloaded the bundle.  No `undefined symbol` error this time — the rejection was silent and post-handshake.  The reviewer-flagged "second-shoe-drops" risk had materialized.
+
+**Diagnosis.** A side-by-side comparison with `smooth.ofx` (a plugin Fusion accepts) exposed a massive structural divergence:
+
+| Metric | `smooth.ofx` (accepted) | `OpenDefocusOFX.ofx` (rejected) |
+|--------|-------------------------|---------------------------------|
+| Dynamic `T` exports | 3 | **2725** |
+| Undefined symbols | 76 | 179 |
+
+`OpenDefocusOFX.ofx` was leaking the entire OFX Support library namespace (`OFX::ImageEffect`, `OFX::GroupParam`, etc.), all of libstdc++'s `std::__cxx11::*` template instantiations the Support library brought in, and every `od_*` C function from the Rust FFI bridge.  Two root causes:
+
+1. **OFX Support library compiled without hidden visibility.**  Even though the bundle target had `CXX_VISIBILITY_PRESET hidden`, the `OfxSupport` static-library target did not — so its translation units were produced with default visibility.  When linked into the bundle, those default-visibility symbols were promoted to dynamic exports regardless of the bundle's own visibility setting.
+2. **Rust `extern "C"` exports default to public visibility.**  The Rust FFI bridge's `od_*` functions had no way to be hidden via CMake visibility presets.
+
+**Fix.** Two pieces, both confined to the build configuration:
+
+1. `set_target_properties(OfxSupport PROPERTIES … C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)` — applied at the OfxSupport target definition.  Reduced exports to 2099.
+2. A linker version script (`plugin/OpenDefocusOFX/OpenDefocusOFX.exports`) wired into the Linux link line via `-Wl,--version-script=…`.  The script's `global:` list contains exactly the three OFX entry points; everything else falls into `local:`:
+
+```
+{
+    global:
+        OfxGetNumberOfPlugins;
+        OfxGetPlugin;
+        OfxSetHost;
+    local:
+        *;
+};
+```
+
+The version script trumps any visibility attribute on static-library symbols, so this works even though Rust's `extern "C"` defaults to default visibility.  The intermediate attempt of `-Wl,--exclude-libs,ALL` was tried first but rejected because it also strips the OFX Support library's deliberately-`EXPORT`-marked `OfxGetNumberOfPlugins` / `OfxGetPlugin`, leaving only `OfxSetHost` visible (which would have broken every host, including the ones that work today).
+
+**Verification.**
+- `nm -D --defined-only OpenDefocusOFX.ofx | grep ' T '` now shows exactly the three OFX entry points — matching `smooth.ofx`'s export profile.
+- Binary size dropped from 10,973,600 to 10,603,064 bytes (~370 KB of removed export metadata).
+- `dlopen` test still resolves `OfxGetNumberOfPlugins` / `OfxGetPlugin` and reports `count=1`.
+- Fusion Studio Linux now loads the bundle without an error dialog, the `v0.1.10-OFX-v6-dev` parameter is visible, and 2D / Depth / GPU rendering all work (UAT 40.1 / 40.2).
+- NUKE Linux + Flame Linux UAT 40.3 all PASS; Flame stderr shows `describe(), plugin: v0.1.10-OFX-v6-dev`, lazy init / GPU↔CPU toggle logs are normal, no `caught panic` traces.
+- DaVinci Resolve Studio UAT 40.4 PASS on both the Fusion Page and the Color Page.
+
+**Why this affected Fusion but not the other hosts.**  All Linux OFX hosts load plugins with `RTLD_NOW | RTLD_GLOBAL`.  NUKE / Flame / Resolve evidently tolerate a high export count silently; standalone Fusion Studio appears to apply additional post-load sanity checks (likely intended to detect symbol-namespace pollution between plugins) that reject bundles exporting more than the spec-required entry points.  The relocation-dependency lines in the original `LD_DEBUG=files` trace (`OpenDefocusOFX.ofx ... needed by DaVinci Resolve Renderer.ofx (relocation dependency)`) were the clue that cross-plugin symbol bleed was occurring; the version script eliminates the bleed entirely.
+
+**Known Issue #26 status (final):** `DEFERRED` → **`RESOLVED (Linux)`**.  macOS and Windows UAT (40.5 / 40.6) remain to confirm no regression on those platforms before declaring full resolution.
+
+**Lesson learned (for the porting playbook).** When a plugin uses both a C++ Support library and a Rust FFI staticlib, applying `CXX_VISIBILITY_PRESET hidden` only at the bundle target is insufficient — the static-library targets need the same property, and the Rust FFI exports need a version script (or equivalent) because their `extern "C"` linkage defaults to public visibility.  This pattern likely applies to any OpenFX plugin combining C++ Support with non-C++ static libraries; consider documenting it in the porting setup notes (`references/OpenDefocus_OFX_移植セットアップ_2章分離.md`) for future ports.
 
 #### kDevVersion
 

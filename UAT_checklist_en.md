@@ -719,39 +719,47 @@ Verifies the resolution of Known Issue #26 (Fusion Studio Linux plugin-load fail
 
 ### 40.1 Fusion Studio Linux Load Verification (Known Issue #26 resolution)
 
+Test date: 2026-05-25, Tester: Hiroshi
+
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 40.1.1 | No error alert on Fusion Studio launch | | The "The following OFX plugins failed to load" dialog does not appear |
-| 40.1.2 | OpenDefocusOFX appears in the tool menu | | Selectable under the Effect / OFX category |
-| 40.1.3 | LD_DEBUG=files no longer shows the OfxSetHost error | | After `LD_DEBUG=files /opt/BlackmagicDesign/Fusion20/Fusion 2>/tmp/log`, `grep OpenDefocus /tmp/log` shows no symbol-lookup error |
+| 40.1.1 | No error alert on Fusion Studio launch | PASS | After applying both the OfxSetHost stub and the visibility fix, the "failed to load" dialog no longer appears |
+| 40.1.2 | OpenDefocusOFX appears in the tool menu | PASS | Selectable; node creation succeeds |
+| 40.1.3 | LD_DEBUG=files no longer shows the OfxSetHost error | PASS | symbol-lookup error gone.  The implicit-rejection second stage was resolved by the visibility fix |
 
 ### 40.2 Fusion Studio Linux Basic Rendering
 
+Test date: 2026-05-25, Tester: Hiroshi
+
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 40.2.1 | Node creation and parameter display | | Controls page shows `v0.1.10-OFX-v6-dev`; all parameter groups are visible |
-| 40.2.2 | 2D mode (Depth disconnected) basic render | | Size=10 renders correctly; output matches other hosts |
-| 40.2.3 | Depth mode basic render | | Depth defocus works correctly with Depth input connected |
-| 40.2.4 | GPU / CPU toggle | | UseGPU toggle switches modes successfully |
+| 40.2.1 | Node creation and parameter display | PASS | Controls page shows `v0.1.10-OFX-v6-dev` |
+| 40.2.2 | 2D mode (Depth disconnected) basic render | PASS | Verified at Size=10–60, Quality Low/High toggle, Filter Type switching |
+| 40.2.3 | Depth mode basic render | PASS | Use Focus Point operation verified |
+| 40.2.4 | GPU / CPU toggle | PASS | UseGPU toggle switches modes successfully |
 
 ### 40.3 NUKE / Flame Regression (critical — verifies the Flame UAT is unaffected)
 
 The OFX 1.5 spec call order is: (1) OfxSetHost → (2) OfxGetNumberOfPlugins → (3) OfxGetPlugin → (4) OfxPlugin::setHost.  This fix only adds a no-op step (1); step (4) is unchanged.  NUKE / Flame behavior should be identical, but verify explicitly.
 
+Test date: 2026-05-25, Tester: Hiroshi
+
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 40.3.1 | NUKE Linux: plugin loads | | No startup error; node appears in the menu |
-| 40.3.2 | NUKE Linux: basic rendering (2D / Depth / GPU) | | Pixel-identical to v5 (A/B compare) |
-| 40.3.3 | Flame Linux: plugin loads | | No error alert; OpenDefocus appears in the media hub |
-| 40.3.4 | Flame Linux: basic rendering (2D / Depth / GPU) | | Pixel-identical to v5 (A/B compare) |
-| 40.3.5 | No new OfxSetHost-related messages in stderr / Flame log | | Output unchanged before vs after the fix |
+| 40.3.1 | NUKE Linux: plugin loads | PASS | No startup error; node appears in the menu |
+| 40.3.2 | NUKE Linux: basic rendering (2D / Depth / GPU) | PASS | Pixel-identical to v5 |
+| 40.3.3 | Flame Linux: plugin loads | PASS | No error alert; OpenDefocus appears in the media hub |
+| 40.3.4 | Flame Linux: basic rendering (2D / Depth / GPU) | PASS | Pixel-identical to v5.  stderr: `describe(), plugin: v0.1.10-OFX-v6-dev` confirmed; lazy-init / GPU↔CPU toggle logs normal; no `caught panic` traces |
+| 40.3.5 | No new OfxSetHost-related messages in stderr / Flame log | PASS | No output diff attributable to the OfxSetHost stub |
 
 ### 40.4 DaVinci Resolve Studio Regression
 
+Test date: 2026-05-25, Tester: Hiroshi
+
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 40.4.1 | Resolve Studio: loads in the Fusion Page | | The path that already worked still works |
-| 40.4.2 | Resolve Studio: basic render in the Fusion Page | | Output matches v5 |
+| 40.4.1 | Resolve Studio: loads in the Fusion Page | PASS | Verified on both the Fusion Page and the Color Page nodes |
+| 40.4.2 | Resolve Studio: basic render in the Fusion Page | PASS | Basic render successful on both the Fusion Page and the Color Page |
 
 ### 40.5 macOS Host Regression (KI#26 inverse check)
 

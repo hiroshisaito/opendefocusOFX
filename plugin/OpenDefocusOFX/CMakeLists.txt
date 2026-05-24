@@ -86,7 +86,15 @@ file(GLOB OFX_SUPPORT_SOURCES "${OFX_SUPPORT_LIBRARY_DIR}/*.cpp")
 add_library(OfxSupport STATIC ${OFX_SUPPORT_SOURCES})
 set_target_properties(OfxSupport PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    LINKER_LANGUAGE CXX)
+    LINKER_LANGUAGE CXX
+    # Apply hidden visibility to OFX Support compilation units so their
+    # symbols (OFX::*, std::__cxx11::*, ~2700 entries) don't leak into the
+    # final .ofx dynamic symbol table.  Only OfxGetNumberOfPlugins /
+    # OfxGetPlugin / OfxSetHost (explicitly visibility("default"))
+    # remain exported, matching the smooth.ofx export profile that the
+    # Fusion Studio Linux loader is known to accept (Known Issue #26).
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden)
 target_include_directories(OfxSupport PUBLIC
     ${OFX_HEADER_DIR}
     ${OFX_SUPPORT_HEADER_DIR})
@@ -143,6 +151,9 @@ elseif(WIN32)
         -static-libgcc
         -static-libstdc++
         -static)
+    # Windows DLLs only export what is marked __declspec(dllexport); the
+    # static-lib symbol leak issue that affects the ELF .ofx on Linux does
+    # not arise in PE/COFF, so no version-script / --exclude-libs is needed.
     target_link_libraries(OpenDefocus PRIVATE
         OfxSupport
         ${RUST_STATICLIB}
@@ -166,6 +177,18 @@ else()
     # Without explicit linking, dlopen fails in hosts that don't pre-load libGL
     # (e.g. Fusion Studio scan phase), causing "undefined symbol: glTranslated".
     find_package(OpenGL REQUIRED)
+    # Linker version script: explicit whitelist of the only three symbols an
+    # OFX host needs to resolve from the bundle.  Hides all leftover symbols
+    # from the OFX Support library and the Rust FFI bridge that --visibility=
+    # hidden cannot reach (Rust extern "C" exports default to public, and the
+    # Support library's EXPORT macro can't be propagated through the bundle's
+    # own visibility setting).  Required for Fusion Studio Linux compatibility
+    # (Known Issue #26) — without this, the .ofx exports ~2700 symbols and
+    # Fusion's plugin loader rejects the bundle.
+    target_link_options(OpenDefocus PRIVATE
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/OpenDefocusOFX.exports")
+    set_target_properties(OpenDefocus PROPERTIES
+        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/OpenDefocusOFX.exports")
     target_link_libraries(OpenDefocus PRIVATE
         OfxSupport
         ${RUST_STATICLIB}
