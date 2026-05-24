@@ -179,9 +179,9 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 
 | # | Issue | Status | Detail |
 |---|-------|--------|--------|
-| 26 | Plugin load error in Fusion Studio (standalone) — Linux only | DEFERRED | Fusion Studio on **Linux** rejects the plugin before OFX entry points are called. **macOS (Intel) loads successfully.** DaVinci Resolve loads successfully on all platforms. OpenGL link (`libGL`) fixed for dlopen compatibility. Panic protection (`catch_unwind`) added to Rust FFI boundary. Linux-specific root cause under investigation (scanner cache or proprietary pre-validation). Not a primary target host |
+| 26 | Plugin load error in Fusion Studio (standalone) — Linux only | RESOLVED (Linux, v6) | Two-stage fix in v0.1.10-OFX-v6: (1) exported a no-op `OfxSetHost` stub returning `kOfxStatOK` (OFX 1.5 spec optional entry point that Fusion's loader treated as fatal-on-absence); (2) added `CXX_VISIBILITY_PRESET hidden` to the OFX Support static library and a linker version script (`OpenDefocusOFX.exports`) that whitelists only the three OFX entry points, dropping the bundle's dynamic export count from 2725 to 3 (matching the export profile Fusion's loader accepts). macOS / Windows verification pending. Verified on Linux: Fusion Studio loads and renders normally; NUKE / Flame / DaVinci Resolve Studio (Fusion Page + Color Page) pixel-identical to v5 |
 
-**BMD Fusion / DaVinci Resolve is not recommended for production use.** UAT has not been completed for these hosts, and performance characteristics (GPU/CPU rendering speed, GUI responsiveness) have not been validated. Use NUKE or Flame for production workflows.
+**Status update (v0.1.10-OFX-v6):** Fusion Studio on **Linux** now loads and renders correctly (UAT 40.1 + 40.2 PASS).  UAT for **macOS** and **Windows** standalone Fusion Studio is pending, and full performance characteristics still warrant validation before recommending Fusion / DaVinci Resolve as primary production hosts.  Use NUKE or Flame for primary production workflows; Fusion / Resolve are now usable on Linux for compositing tasks.
 
 ### Flame: Known Limitations
 

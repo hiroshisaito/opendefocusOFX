@@ -2425,6 +2425,7 @@ The version script trumps any visibility attribute on static-library symbols, so
 - **P0 Stability Fixes**: Complete (per-instance abort, GPU toggle, depth fetch throttling)
 - **P1 Improvements**: Complete (lazy renderer init, draft render optimization, eContextFilter guard, failure logging)
 - **FFI Panic Protection**: Hardened in v6-dev — every renderer-creation path (lazy-init, GPU toggle, lazy-init CPU fallback, stripe-loop CPU fallback) and every GPU stripe wrapped in `catch_unwind`
+- **Fusion Studio (Linux standalone)**: Known Issue #26 **RESOLVED** in v6-dev (Linux verified) — two-stage fix: (1) OfxSetHost stub, (2) `OpenDefocusOFX.exports` linker version script reducing dynamic exports from 2725 to 3. macOS / Windows verification pending. NUKE / Flame / DaVinci Resolve Studio confirmed pixel-identical to v5 on Linux
 - **Thread Safety**: eRenderUnsafe → eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`)
 - **Released version**: `v0.1.10-OFX-v5` (2026-04-04)
