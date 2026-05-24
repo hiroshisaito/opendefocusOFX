@@ -701,6 +701,78 @@ Test environment:
 
 ---
 
+## 40. v0.1.10-OFX-v6-dev UAT — Fusion Studio (Linux standalone) Compatibility (Known Issue #26 candidate fix)
+
+Test environment: Linux Rocky 9.5 + BMD Fusion Studio (standalone); Linux Rocky 9.5 + Flame / NUKE / DaVinci Resolve Studio (regression)
+
+**Scope:**
+Verifies the resolution of Known Issue #26 (Fusion Studio Linux plugin-load failure, deferred since v0.1.10-OFX-v1) and confirms no regression on NUKE / Flame / DaVinci Resolve Studio.
+
+**v6-dev changes covered:**
+- No-op `OfxSetHost` stub added at the bottom of `plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`
+- `__attribute__((visibility("default")))` overrides the bundle-wide `-fvisibility=hidden`
+- `_WIN32` branch uses `__declspec(dllexport)`
+
+**Prerequisite:**
+- Confirm `nm -D --defined-only OpenDefocusOFX.ofx | grep OfxSetHost` shows `T OfxSetHost` before starting
+- kDevVersion is still `v0.1.10-OFX-v6-dev`
+
+### 40.1 Fusion Studio Linux Load Verification (Known Issue #26 resolution)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.1.1 | No error alert on Fusion Studio launch | | The "The following OFX plugins failed to load" dialog does not appear |
+| 40.1.2 | OpenDefocusOFX appears in the tool menu | | Selectable under the Effect / OFX category |
+| 40.1.3 | LD_DEBUG=files no longer shows the OfxSetHost error | | After `LD_DEBUG=files /opt/BlackmagicDesign/Fusion20/Fusion 2>/tmp/log`, `grep OpenDefocus /tmp/log` shows no symbol-lookup error |
+
+### 40.2 Fusion Studio Linux Basic Rendering
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.2.1 | Node creation and parameter display | | Controls page shows `v0.1.10-OFX-v6-dev`; all parameter groups are visible |
+| 40.2.2 | 2D mode (Depth disconnected) basic render | | Size=10 renders correctly; output matches other hosts |
+| 40.2.3 | Depth mode basic render | | Depth defocus works correctly with Depth input connected |
+| 40.2.4 | GPU / CPU toggle | | UseGPU toggle switches modes successfully |
+
+### 40.3 NUKE / Flame Regression (critical — verifies the Flame UAT is unaffected)
+
+The OFX 1.5 spec call order is: (1) OfxSetHost → (2) OfxGetNumberOfPlugins → (3) OfxGetPlugin → (4) OfxPlugin::setHost.  This fix only adds a no-op step (1); step (4) is unchanged.  NUKE / Flame behavior should be identical, but verify explicitly.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.3.1 | NUKE Linux: plugin loads | | No startup error; node appears in the menu |
+| 40.3.2 | NUKE Linux: basic rendering (2D / Depth / GPU) | | Pixel-identical to v5 (A/B compare) |
+| 40.3.3 | Flame Linux: plugin loads | | No error alert; OpenDefocus appears in the media hub |
+| 40.3.4 | Flame Linux: basic rendering (2D / Depth / GPU) | | Pixel-identical to v5 (A/B compare) |
+| 40.3.5 | No new OfxSetHost-related messages in stderr / Flame log | | Output unchanged before vs after the fix |
+
+### 40.4 DaVinci Resolve Studio Regression
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.4.1 | Resolve Studio: loads in the Fusion Page | | The path that already worked still works |
+| 40.4.2 | Resolve Studio: basic render in the Fusion Page | | Output matches v5 |
+
+### 40.5 PASS Criteria
+
+- 40.1: **all items must PASS** (evidence that Known Issue #26 is resolved)
+- 40.2: **all items must PASS** (confirms Fusion Studio Linux is now usable)
+- 40.3: **all items must PASS** (no impact on Flame / NUKE — v6 release blocker)
+- 40.4: **all items must PASS** (preserves the previously working Resolve Studio path)
+
+If anything in 40.3 fails, the OfxSetHost stub must be reverted or made conditional, blocking the v6 release.
+
+### 40.6 Common Prep
+
+1. Confirm the v6-dev bundle has been produced at `bundle/OpenDefocusOFX.ofx.bundle/`
+2. Install: `sudo cp -R '/path/to/bundle/OpenDefocusOFX.ofx.bundle' /usr/OFX/Plugins/` (recommend removing the existing v5 bundle first)
+3. Verify the dynamic symbol: `nm -D --defined-only /usr/OFX/Plugins/OpenDefocusOFX.ofx.bundle/Contents/Linux-x86-64/OpenDefocusOFX.ofx | grep OfxSetHost`
+4. Fusion Studio: `/opt/BlackmagicDesign/Fusion20/Fusion`
+5. NUKE / Flame: default paths
+6. DaVinci Resolve Studio: launch normally, then switch to the Fusion Page
+
+---
+
 ## FAIL Item Summary (Phase 2 UAT)
 
 | # | Item | Category | Status |

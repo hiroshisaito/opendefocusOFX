@@ -2329,6 +2329,37 @@ Third-pass static review by the review team identified two HIGH-severity gaps in
 - **HIGH #6** (CMake `BYPRODUCTS`) — queued for next revision (cosmetic Ninja warning only).
 - **M9** (`Cargo.lock` tracking) — queued for next revision.
 
+### 2026-05-25: Fusion Studio (Linux standalone) Compatibility — OfxSetHost stub (Known Issue #26 candidate fix)
+
+Standalone Fusion Studio on Linux had been deferred since 2026-03-26 as Known Issue #26 ("plugin scanner rejects the bundle before standard OFX handshake"; DaVinci Resolve loads it correctly).  An `LD_DEBUG=files` trace on Rocky Linux 9.5 against Fusion 20 finally pinned the root cause:
+
+```
+/usr/OFX/Plugins/OpenDefocusOFX.ofx.bundle/.../OpenDefocusOFX.ofx: error:
+  symbol lookup error: undefined symbol: OfxSetHost (fatal)
+```
+
+OFX 1.5 spec lists `OfxSetHost` as an *optional* C entry point — NUKE / Flame / DaVinci Resolve all tolerate its absence and rely on the `OfxPlugin::setHost` member callback that the C++ Support library wires up.  Standalone Fusion Studio's loader instead `dlsym`-looks-up the symbol and treats its absence as fatal.
+
+**Fix:** Exported a no-op `OfxSetHost` stub at the bottom of `plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`:
+
+```cpp
+extern "C" __attribute__((visibility("default")))
+OfxStatus OfxSetHost(const OfxHost* /*host*/) {
+    return kOfxStatReplyDefault;
+}
+```
+
+Notes:
+- `OfxExport` is `#define OfxExport extern` on Linux and does not add a visibility attribute; the bundle is built with `-fvisibility=hidden`, so an explicit `default` visibility is required (matching the `EXPORT` macro used by the Support library for `OfxGetNumberOfPlugins` / `OfxGetPlugin`).
+- A `_WIN32` branch uses `__declspec(dllexport)` to keep the symbol visible on the MSYS2 UCRT64 build.
+- The C++ Support library's host capture (`OfxPlugin::setHost = OFX::Private::setHost` in `ofxsImageEffect.cpp:3026`) is unchanged.  OFX 1.5 spec orders the calls as: (1) `OfxSetHost`, (2) `OfxGetNumberOfPlugins`, (3) `OfxGetPlugin`, (4) `OfxPlugin::setHost`.  Step (4) still runs on every host, so the canonical wiring is preserved on NUKE / Flame / Resolve.
+
+**Verification:**
+- `nm -D --defined-only ...` confirms `T OfxSetHost` is now in the dynamic symbol table.
+- UAT must verify on standalone Fusion Studio Linux (load + render) AND confirm no regression on NUKE / Flame / Resolve.
+
+**Known Issue #26 status:** Promoted from `DEFERRED` to `RESOLVED (pending Fusion Studio Linux UAT)`.
+
 #### kDevVersion
 
 `v0.1.10-OFX-v6-dev`

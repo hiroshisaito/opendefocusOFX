@@ -2178,3 +2178,36 @@ void getPluginIDs(OFX::PluginFactoryArray& ids) {
 }
 
 }} // namespace OFX::Plugin
+
+// ---------------------------------------------------------------------------
+// OfxSetHost stub — Fusion Studio (Linux standalone) compatibility
+//
+// OFX 1.5 added OfxSetHost as an *optional* C entry point.  NUKE, Flame and
+// DaVinci Resolve all tolerate its absence and call OfxPlugin::setHost (the
+// struct-member callback wired up by the C++ Support library) instead.
+//
+// Standalone Fusion Studio on Linux dlopens plugins with RTLD_NOW and then
+// dlsym-looks-up "OfxSetHost"; treating its absence as fatal it reports
+// "undefined symbol: OfxSetHost" and refuses to load the bundle (Known
+// Issue #26).  Exporting a no-op stub satisfies that check.
+//
+// Defining this does NOT change the load path on other hosts: per OFX 1.5
+// spec the host still calls OfxPlugin::setHost after OfxGetPlugin returns,
+// so the C++ Support library's host capture remains the canonical wiring.
+// kOfxStatReplyDefault signals "function ran normally, no action taken".
+//
+// Note: `OfxExport` is `#define OfxExport extern` on Linux and does not
+// add visibility attributes; the bundle is built with -fvisibility=hidden,
+// so we need an explicit default-visibility attribute to actually export
+// the symbol (matching the EXPORT macro the Support library uses for
+// OfxGetNumberOfPlugins / OfxGetPlugin in ofxsImageEffect.cpp).
+// ---------------------------------------------------------------------------
+#if defined(_WIN32)
+extern "C" __declspec(dllexport) OfxStatus OfxSetHost(const OfxHost* /*host*/) {
+    return kOfxStatReplyDefault;
+}
+#else
+extern "C" __attribute__((visibility("default"))) OfxStatus OfxSetHost(const OfxHost* /*host*/) {
+    return kOfxStatReplyDefault;
+}
+#endif

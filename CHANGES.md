@@ -14,6 +14,10 @@
 - **Windows: self-contained bundle**: The Windows `.ofx` now statically links libgcc / libstdc++ / libwinpthread. The bundle can be deployed to NUKE / Flame / Resolve hosts without installing MSYS2 UCRT64 runtimes. Binary size: 9.5 MB → 12.5 MB.
 - **Windows toolchain**: Migrated from Strawberry MinGW (GCC 13.2.0) to MSYS2 UCRT64 (GCC 15.2.0) for actively-maintained Windows GNU toolchain support.
 
+### Compatibility
+
+- **Fusion Studio (Linux standalone) load failure resolved (Known Issue #26)**: Exported a no-op `OfxSetHost` stub. The OFX 1.5 spec marks this entry point as optional and the C++ Support library does not provide it, but standalone Fusion Studio Linux's plugin loader treats its absence as fatal (`undefined symbol: OfxSetHost`). The stub returns `kOfxStatReplyDefault` and does not alter the load path for NUKE / Flame / DaVinci Resolve — host capture still flows through `OfxPlugin::setHost`. The symbol is given explicit `default` visibility to override the bundle-wide `-fvisibility=hidden`.
+
 ### Documentation
 
 - Documented the non-negative RoD origin invariant assumed by `static_cast<int>` truncation (NUKE / Flame only; re-validate when adding Resolve / Fusion).
