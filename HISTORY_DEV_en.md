@@ -2362,7 +2362,7 @@ Notes:
 **Known Issue #26 status (initial assessment):** Promoted from `DEFERRED` to `RESOLVED (pending Fusion Studio Linux UAT)`.
 
 **Follow-up actions:**
-- **BMD upstream bug report**: File a Fusion Studio Linux defect against BMD citing OFX 1.5 spec (`OfxSetHost` is optional per `ofxLoadingSequence.rst:10` and `relnotes-1.5.rst:44`) and attach the `LD_DEBUG=files` trace.  Resolution would let downstream OFX plugins drop the stub; until then the shim is the cheapest interim fix.  TODO: filed by [date / by whom — to record].
+- **BMD upstream bug report**: File a Fusion Studio Linux defect against BMD citing OFX 1.5 spec (`OfxSetHost` is optional per `ofxLoadingSequence.rst:10` and `relnotes-1.5.rst:44`) and attach the `LD_DEBUG=files` trace.  Resolution would let downstream OFX plugins drop the stub; until then the shim is the cheapest interim fix.  Status: not yet filed — assignee and date to be recorded once submitted.
 - **KI#27 candidate — second-shoe-drops sweep**: One `LD_DEBUG=symbols` run against Fusion Studio Linux loading the current plugin to confirm no *other* OFX 1.5 optional symbol triggers the same "fatal on absence" behavior.  If any do, decide stub-vs-skip per symbol.
 
 ### 2026-05-25: KI#26 Stage 2 — Visibility Leak Fix
