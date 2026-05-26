@@ -20,7 +20,7 @@ The ported version receives a `-OFX-v<revision>` suffix.
 - When only the OFX side is modified for the same original version, the revision is incremented
   - Example: OFX-side bug fix → `v0.1.10-OFX-v2`
 
-Current target: **OpenDefocus v0.1.10** → Released **v0.1.10-OFX-v5**, dev **v0.1.10-OFX-v6-dev**
+Current target: **OpenDefocus v0.1.10** → Released **v0.1.10-OFX-v6** (2026-05-26)
 
 ## Directory Structure
 
@@ -2488,23 +2488,47 @@ Windows manual UAT completed for the v6-dev toolchain migration and static runti
 
 **Remaining (39.4):** Linux Rocky 9.5 (39.4.1) and macOS Intel (39.4.2) spot-checks.  These are a cross-OS regression sanity check; the static-link change is scoped to the `elseif(WIN32)` branch of `plugin/OpenDefocusOFX/CMakeLists.txt` and is unreachable from non-Windows builds, so any regression there would have to come from the v6 merge (FFI panic hardening or the Fusion Studio Linux export-script fix), not from the Windows work.  The Linux / macOS dev repos will pick the state up after the push.
 
+### 2026-05-26: v0.1.10-OFX-v6 Release
+
+UAT cycle closed.  Dropped the `-dev` suffix and shipped.
+
+**Per-platform UAT consolidation:**
+- **Linux** — §38 (FFI panic protection) results implicit in §40.3 stderr traces (`describe(), plugin: v0.1.10-OFX-v6-dev`, lazy-init / GPU↔CPU toggle ログ normal, no `caught panic` traces).  §40 PASS 16/16 covering Fusion Studio Linux load (KI#26 §40.1) + Fusion Linux basic rendering (§40.2) + NUKE / Flame regression (§40.3) + DaVinci Resolve Studio Fusion Page + Color Page (§40.4).  Tested 2026-05-25 on Rocky Linux 9.5.
+- **Windows** — §39 PASS 9/9 covering self-contained bundle deployment on a clean Windows 11 PC (no MSYS2 / Strawberry MinGW), NUKE 16 + Fusion Studio 20 rendering, `dumpbin /dependents` verifies no libgcc / libstdc++ / libwinpthread DLL imports.  Tested 2026-05-26.
+- **macOS Intel x86_64** — §41 PASS 11/11 (Flame 2026.2.1) + §42 PASS 6/6 (NUKE 16.0v6, §40.5.1 x86_64 coverage) + §43 PASS 5/5 (Fusion Studio 20, §40.5.2 retention).  Tested 2026-05-26 on macOS 15.7 Sequoia.
+- **macOS arm64** — cross-compiled only (Phase E precedent — no Apple Silicon machine available); ships untested on hardware.  Same source tree as x86_64.
+
+**Release artifacts (`release/`):**
+- `OpenDefocusOFX-v0.1.10-OFX-v6-linux-x86_64.tar.gz` (Linux x86_64)
+- `OpenDefocusOFX-v0.1.10-OFX-v6-macOS-arm64.zip` (macOS arm64)
+- `OpenDefocusOFX-v0.1.10-OFX-v6-macOS-x86_64.zip` (macOS Intel x86_64)
+- `OpenDefocusOFX-v0.1.10-OFX-v6-Win64.zip` (Windows x86_64)
+
+The v6-dev UAT bundles were rebuilt against the final `v0.1.10-OFX-v6` kDevVersion to keep the release artifacts and the binaries the testers verified functionally identical (only the version string differs).
+
+**Carried forward (post-release tasks):**
+- §39.4 (Linux + macOS spot-check of Windows toolchain change) — sanity check, not blocking.
+- §40.5.3 (Resolve Studio macOS Fusion Page) — still pending; existing macOS Resolve path was working pre-v6 (KI#26 record), so this is retention check only.
+- BMD upstream bug report for OFX 1.5 `OfxSetHost` spec compliance — status: not yet filed.
+- KI#27 candidate sweep for other Fusion Studio Linux fatal-on-absence optional OFX symbols.
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
 - **macOS Support**: Complete, v0.1.10-OFX-v3 released (Linux + macOS)
-- **Windows Support**: v6-dev MSYS2 UCRT64 + static runtime — Section 39 Windows manual UAT 9/9 PASS (NUKE 16 + Fusion Studio 20 on a clean Windows 11 PC); 39.4 cross-OS spot-checks pending
+- **Windows Support**: v6 MSYS2 UCRT64 + static runtime, self-contained bundle (no DLL dependencies) — Section 39 Windows manual UAT 9/9 PASS (NUKE 16 + Fusion Studio 20 on a clean Windows 11 PC); §39.4 cross-OS spot-checks remain as carried-forward sanity checks
 - **P0 Stability Fixes**: Complete (per-instance abort, GPU toggle, depth fetch throttling)
 - **P1 Improvements**: Complete (lazy renderer init, draft render optimization, eContextFilter guard, failure logging)
 - **FFI Panic Protection**: Hardened in v6-dev — every renderer-creation path (lazy-init, GPU toggle, lazy-init CPU fallback, stripe-loop CPU fallback) and every GPU stripe wrapped in `catch_unwind`
-- **Fusion Studio (Linux standalone)**: Known Issue #26 **RESOLVED** in v6-dev (Linux verified) — two-stage fix: (1) OfxSetHost stub, (2) `OpenDefocusOFX.exports` linker version script reducing dynamic exports from 2725 to 3. macOS / Windows verification pending. NUKE / Flame / DaVinci Resolve Studio confirmed pixel-identical to v5 on Linux
+- **Fusion Studio (Linux standalone)**: Known Issue #26 **RESOLVED** in v6 (Linux verified) — two-stage fix: (1) OfxSetHost stub, (2) `OpenDefocusOFX.exports` linker version script reducing dynamic exports from 2725 to 3. macOS / Windows UAT also PASS (§41–43). NUKE / Flame / DaVinci Resolve Studio confirmed pixel-identical to v5 on Linux + macOS
 - **Thread Safety**: eRenderUnsafe → eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`)
-- **Released version**: `v0.1.10-OFX-v5` (2026-04-04)
-- **Current dev version**: `v0.1.10-OFX-v6-dev`
+- **Released version**: `v0.1.10-OFX-v6` (2026-05-26)
+- **Linux dev/test environment**: Rocky Linux 9.5 (x86_64); macOS dev: 15.7 Intel x86_64; Windows dev: 11 + MSYS2 UCRT64 GCC 15.2.0
 
 ### Next Steps
 
-1. **v0.1.10-OFX-v6 release planning**: Bundles Windows MSYS2 UCRT64 toolchain, Windows static runtime linking, and post-v5 FFI panic hardening
+1. **Post-v6 carried-forward**: §39.4 Linux + macOS spot-check of Windows toolchain change; §40.5.3 Resolve Studio macOS retention check; BMD upstream bug report for OFX 1.5 `OfxSetHost` compliance
 2. **Next-revision items**: M9 (Cargo.lock tracking), HIGH #6 (CMake `BYPRODUCTS`)
 3. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
 4. **Open test feedback**: Monitor and respond to tester reports

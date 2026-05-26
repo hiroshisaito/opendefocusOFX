@@ -1,6 +1,6 @@
 # Changelog — OpenDefocus OFX
 
-## Unreleased
+## v0.1.10-OFX-v6 (2026-05-26)
 
 ### Stability
 
@@ -31,6 +31,15 @@
 - Documented the non-negative RoD origin invariant assumed by `static_cast<int>` truncation (NUKE / Flame only; re-validate when adding Resolve / Fusion).
 - Documented the macOS Intel deprecated-path deviation (Intel ships to `MacOS-x86-64` pending universal binary migration in the next major release).
 - Removed stale comment about fetchWindow X-axis trimming (no longer applicable after the X-overscan removal in v4).
+
+### Notes
+
+- Based on upstream OpenDefocus v0.1.10 (unchanged)
+- Linux dev/test environment migrated from Rocky Linux 8.10 to 9.5
+- Tested on: Flame (Linux + macOS), NUKE (Linux + macOS), Fusion Studio (Linux + macOS + Windows), DaVinci Resolve Studio (Linux); Fusion Studio Linux Known Issue #26 RESOLVED
+- Platforms: Linux x86_64, macOS x86_64 / arm64, Windows x86_64
+
+---
 
 ## v0.1.10-OFX-v5 (2026-04-04)
 
