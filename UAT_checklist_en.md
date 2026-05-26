@@ -665,9 +665,9 @@ Fill in as the UAT progresses. The auto-checkable rows (39.1.2 / 39.1.3) are alr
 | Bundle path | `bundle/OpenDefocusOFX.ofx.bundle/Contents/Win64/OpenDefocusOFX.ofx` |
 | Bundle SHA-256 | _(optional; run `sha256sum` on the .ofx)_ |
 | Dev PC (build host) | Windows 11 + MSYS2 UCRT64 GCC 15.2.0 + Rust stable-x86_64-pc-windows-gnu |
-| Clean PC (39.1.1) | _hostname, Windows build, confirmed no MSYS2/Strawberry MinGW in PATH_ |
-| NUKE version (39.2) | _e.g. NUKE 16.0v3_ |
-| Fusion version (39.3) | _e.g. Fusion Studio 19.x_ |
+| Clean PC (39.1.1) | Windows 11 clean install — neither MSYS2 nor Strawberry MinGW present |
+| NUKE version (39.2) | NUKE 16 |
+| Fusion version (39.3) | Fusion Studio 20 |
 | Linux env (39.4) | _e.g. Rocky 9.5 + Flame 2026.1_ |
 | macOS env (39.4) | _e.g. macOS 15.7 Intel + NUKE 16.0v3_ |
 | v5 bundle for A/B (path) | _(optional; v5 .ofx kept at separate path for comparison renders)_ |
@@ -676,7 +676,7 @@ Fill in as the UAT progresses. The auto-checkable rows (39.1.2 / 39.1.3) are alr
 
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 39.1.1 | Bundle is recognized on a clean Windows 11 PC | | NUKE / Fusion load the plugin on a machine with neither MSYS2 nor Strawberry MinGW installed |
+| 39.1.1 | Bundle is recognized on a clean Windows 11 PC | PASS (2026-05-26) | Installed on clean Windows 11 PC (no MSYS2 / no Strawberry MinGW). Both Fusion Studio 20 and NUKE 16 loaded the plugin and launched successfully |
 | 39.1.2 | Bundle size ~12.5 MB | PASS (2026-05-26) | 12,471,117 bytes = 12.47 MB (decimal) / 11.89 MiB (binary). +3 MB from v5 confirms static linking took effect. Verified via `stat -c%s` on dev PC |
 | 39.1.3 | `dumpbin /dependents` shows no libgcc / libstdc++ / libwinpthread DLL dependencies | PASS (2026-05-26) | Verified via `objdump -p` on dev PC. Import table contains only Windows 10/11 system libraries (KERNEL32, ntdll, api-ms-win-crt-* (UCRT), OPENGL32, bcryptprimitives, api-ms-win-core-synch). None of libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll appear |
 
@@ -684,18 +684,18 @@ Fill in as the UAT progresses. The auto-checkable rows (39.1.2 / 39.1.3) are alr
 
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 39.2.1 | 2D mode render completes normally | | Output matches v5 (Strawberry MinGW) |
-| 39.2.2 | Depth mode render completes normally | | Output matches v5 |
-| 39.2.3 | GPU render completes normally (2D / Depth / UHD) | | GCC 15 + wgpu integration confirmed |
-| 39.2.4 | Write-node batch render (24 frames) completes | | No thread-safety regression |
-| 39.2.5 | No crash on NUKE shutdown | | No destruction-order issues from static linking |
+| 39.2.1 | 2D mode render completes normally | PASS (2026-05-26) | Output matches v5 (Strawberry MinGW) |
+| 39.2.2 | Depth mode render completes normally | PASS (2026-05-26) | Covered by 39.2.4 (50-frame batch write-out was executed in Depth mode). Output matches v5 |
+| 39.2.3 | GPU render completes normally (2D / Depth / UHD) | PASS (2026-05-26) | GCC 15 + wgpu integration confirmed |
+| 39.2.4 | Write-node batch render (24 frames) completes | PASS (2026-05-26) | 50-frame write-out in NUKE Depth mode (exceeds the 24-frame baseline; simultaneously satisfies 39.2.2). No thread-safety regression |
+| 39.2.5 | No crash on NUKE shutdown | PASS (2026-05-26) | No destruction-order issues from static linking |
 
 ### 39.3 Windows Rendering Regression (Fusion Studio)
 
 | # | Item | Result | Notes |
 |---|------|--------|-------|
-| 39.3.1 | Basic 2D / Depth / GPU rendering | | Output matches v5 |
-| 39.3.2 | No crash on Fusion shutdown | | |
+| 39.3.1 | Basic 2D / Depth / GPU rendering | PASS (2026-05-26) | Verified on Fusion Studio 20 (Windows). Output matches v5 |
+| 39.3.2 | No crash on Fusion shutdown | PASS (2026-05-26) | Verified on Fusion Studio 20 (Windows) |
 
 ### 39.4 Other OS Regression (Toolchain Change Impact)
 
@@ -717,26 +717,6 @@ Fill in as the UAT progresses. The auto-checkable rows (39.1.2 / 39.1.3) are alr
 3. Run `dumpbin /dependents OpenDefocusOFX.ofx` on the clean PC (requires Visual Studio Build Tools or Windows SDK)
 4. Launch NUKE / Fusion on the clean PC with log output enabled
 5. Keep the v5 bundle in parallel for A/B comparison renders
-
-### 39.7 Execution Summary
-
-Fill in once the section is complete. The PASS Criteria in 39.5 determine the verdict.
-
-| Group | Items | PASS / FAIL / N/A | Verdict notes |
-|-------|-------|-------------------|---------------|
-| 39.1 Bundle self-containment | 39.1.1 – 39.1.3 | 2 PASS / 0 FAIL / 1 pending (39.1.1) | 39.1.2 / 39.1.3 auto-verified 2026-05-26; 39.1.1 requires clean-PC manual test |
-| 39.2 NUKE Windows rendering | 39.2.1 – 39.2.5 | _x PASS / x FAIL / x N/A_ | |
-| 39.3 Fusion Studio Windows rendering | 39.3.1 – 39.3.2 | _x PASS / x FAIL / x N/A_ | |
-| 39.4 Other OS regression | 39.4.1 – 39.4.2 | _x PASS / x FAIL / x N/A_ | |
-| **Overall verdict** | — | _PASS / FAIL / HOLD_ | _date / signoff_ |
-
-### 39.8 Issues Found
-
-Record any unexpected behavior encountered during UAT.  Use one row per distinct issue.  An item that ends as PASS but had a quirk worth tracking belongs here too.
-
-| # | Section | Severity | Summary | Repro steps | Workaround / status |
-|---|---------|----------|---------|-------------|---------------------|
-| _e.g. 39-I-1_ | _e.g. 39.2.3_ | _BLOCKER / MAJOR / MINOR / NOTE_ | _(short)_ | _(steps)_ | _(open / fixed in commit ... / wontfix)_ |
 
 ---
 
