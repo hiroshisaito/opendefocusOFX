@@ -2417,11 +2417,29 @@ The version script trumps any visibility attribute on static-library symbols, so
 
 `v0.1.10-OFX-v6-dev`
 
+### 2026-05-26: Windows UAT — Section 39 (MSYS2 UCRT64 + Static Runtime) — 9/9 PASS
+
+Windows manual UAT completed for the v6-dev toolchain migration and static runtime linking.  All nine Windows-side items pass; 39.4 cross-OS spot-checks remain.
+
+**Test environment:**
+- Dev PC (build host): Windows 11 + MSYS2 UCRT64 GCC 15.2.0 + Rust `stable-x86_64-pc-windows-gnu`
+- Clean PC (deployment target): Windows 11 — neither MSYS2 nor Strawberry MinGW present in PATH
+- Hosts: NUKE 16, Fusion Studio 20
+
+**Results (all PASS, 2026-05-26):**
+- **39.1 Bundle self-containment (3/3)**: bundle 12,471,117 bytes (12.47 MB); `objdump -p` import table contains only Windows 10/11 system libraries (no `libgcc_s_seh-1.dll` / `libstdc++-6.dll` / `libwinpthread-1.dll`); Fusion Studio 20 and NUKE 16 both loaded the plugin on the clean PC.
+- **39.2 NUKE Windows rendering (5/5)**: 2D mode, Depth mode, GPU (2D / Depth / UHD), 50-frame batch write-out in Depth mode (exceeds the 24-frame baseline and simultaneously covers 39.2.2), no shutdown crash.
+- **39.3 Fusion Studio Windows rendering (2/2)**: basic 2D / Depth / GPU rendering, no shutdown crash.
+
+**v6 release blockers (39.1.1 / 39.1.3) cleared.**
+
+**Remaining (39.4):** Linux Rocky 9.5 (39.4.1) and macOS Intel (39.4.2) spot-checks.  These are a cross-OS regression sanity check; the static-link change is scoped to the `elseif(WIN32)` branch of `plugin/OpenDefocusOFX/CMakeLists.txt` and is unreachable from non-Windows builds, so any regression there would have to come from the v6 merge (FFI panic hardening or the Fusion Studio Linux export-script fix), not from the Windows work.  The Linux / macOS dev repos will pick the state up after the push.
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
 - **macOS Support**: Complete, v0.1.10-OFX-v3 released (Linux + macOS)
-- **Windows Support**: Complete; v5 used MinGW (Strawberry), v6-dev uses MSYS2 UCRT64 with static runtime linking
+- **Windows Support**: v6-dev MSYS2 UCRT64 + static runtime — Section 39 Windows manual UAT 9/9 PASS (NUKE 16 + Fusion Studio 20 on a clean Windows 11 PC); 39.4 cross-OS spot-checks pending
 - **P0 Stability Fixes**: Complete (per-instance abort, GPU toggle, depth fetch throttling)
 - **P1 Improvements**: Complete (lazy renderer init, draft render optimization, eContextFilter guard, failure logging)
 - **FFI Panic Protection**: Hardened in v6-dev — every renderer-creation path (lazy-init, GPU toggle, lazy-init CPU fallback, stripe-loop CPU fallback) and every GPU stripe wrapped in `catch_unwind`
