@@ -59,15 +59,13 @@ set(RUST_STATICLIB "${RUST_LIB_DIR}/libopendefocus_ofx_bridge.a")
 # where CMake's OUTPUT-based dependency tracking doesn't see Rust source
 # changes (the .a already exists) and silently skips recompilation.
 if(WIN32)
-    # Windows (MinGW): set PROTOC to system protoc (protobuf-vendored not used),
-    # and pass -Wa,-mbig-obj to handle large COFF sections in protobuf-src.
+    # Windows (MSYS2 UCRT64): set PROTOC to system protoc (protobuf-vendored not
+    # used on Windows; see Cargo.toml cfg(not(windows)) dependency section).
+    # PATH is inherited from the build environment; cargo must be in PATH already.
     find_program(PROTOC_EXECUTABLE protoc REQUIRED)
     add_custom_target(rust_bridge ALL
         COMMAND ${CMAKE_COMMAND} -E env
-            "PATH=$ENV{USERPROFILE}/.cargo/bin;$ENV{PATH}"
             "PROTOC=${PROTOC_EXECUTABLE}"
-            "CFLAGS=-Wa,-mbig-obj"
-            "CXXFLAGS=-Wa,-mbig-obj"
             cargo build ${CARGO_BUILD_FLAG} ${CARGO_TARGET_FLAG}
         WORKING_DIRECTORY "${RUST_BRIDGE_DIR}"
         COMMENT "Building Rust opendefocus-ofx-bridge staticlib"
@@ -88,7 +86,15 @@ file(GLOB OFX_SUPPORT_SOURCES "${OFX_SUPPORT_LIBRARY_DIR}/*.cpp")
 add_library(OfxSupport STATIC ${OFX_SUPPORT_SOURCES})
 set_target_properties(OfxSupport PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    LINKER_LANGUAGE CXX)
+    LINKER_LANGUAGE CXX
+    # Apply hidden visibility to OFX Support compilation units so their
+    # symbols (OFX::*, std::__cxx11::*, ~2700 entries) don't leak into the
+    # final .ofx dynamic symbol table.  Only OfxGetNumberOfPlugins /
+    # OfxGetPlugin / OfxSetHost (explicitly visibility("default"))
+    # remain exported, matching the smooth.ofx export profile that the
+    # Fusion Studio Linux loader is known to accept (Known Issue #26).
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden)
 target_include_directories(OfxSupport PUBLIC
     ${OFX_HEADER_DIR}
     ${OFX_SUPPORT_HEADER_DIR})
@@ -135,9 +141,19 @@ if(APPLE)
         ${COREFOUNDATION_FRAMEWORK}
         ${OBJC_LIB})
 elseif(WIN32)
-    # Windows (MinGW): Rust wgpu uses D3D12/Vulkan backends.
+    # Windows (MSYS2 UCRT64): Rust wgpu uses D3D12/Vulkan backends.
     # System libraries required by Rust std + wgpu on Windows.
     find_package(OpenGL REQUIRED)
+    # Statically link GCC/libstdc++/winpthread runtimes so the bundle does not
+    # depend on libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll being
+    # present on the end-user machine (NUKE / Flame / Resolve hosts).
+    target_link_options(OpenDefocus PRIVATE
+        -static-libgcc
+        -static-libstdc++
+        -static)
+    # Windows DLLs only export what is marked __declspec(dllexport); the
+    # static-lib symbol leak issue that affects the ELF .ofx on Linux does
+    # not arise in PE/COFF, so no version-script / --exclude-libs is needed.
     target_link_libraries(OpenDefocus PRIVATE
         OfxSupport
         ${RUST_STATICLIB}
@@ -161,6 +177,18 @@ else()
     # Without explicit linking, dlopen fails in hosts that don't pre-load libGL
     # (e.g. Fusion Studio scan phase), causing "undefined symbol: glTranslated".
     find_package(OpenGL REQUIRED)
+    # Linker version script: explicit whitelist of the only three symbols an
+    # OFX host needs to resolve from the bundle.  Hides all leftover symbols
+    # from the OFX Support library and the Rust FFI bridge that --visibility=
+    # hidden cannot reach (Rust extern "C" exports default to public, and the
+    # Support library's EXPORT macro can't be propagated through the bundle's
+    # own visibility setting).  Required for Fusion Studio Linux compatibility
+    # (Known Issue #26) — without this, the .ofx exports ~2700 symbols and
+    # Fusion's plugin loader rejects the bundle.
+    target_link_options(OpenDefocus PRIVATE
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/OpenDefocusOFX.exports")
+    set_target_properties(OpenDefocus PROPERTIES
+        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/OpenDefocusOFX.exports")
     target_link_libraries(OpenDefocus PRIVATE
         OfxSupport
         ${RUST_STATICLIB}
@@ -171,6 +199,11 @@ else()
 endif()
 
 # --- Bundle installation ---
+# NOTE: OFX 1.5 deprecated `MacOS-x86-64`/`MacOS` per-arch paths in favor of a
+# single universal `MacOS/` directory.  Intel binaries currently ship to the
+# deprecated `MacOS-x86-64` path pending universal binary migration in the next
+# major release; NUKE / Flame still resolve both paths.  Strict OFX 1.5 hosts
+# may fail to discover the Intel build until lipo-based universal output lands.
 if(APPLE)
     if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
         set(ARCHDIR "MacOS-x86-64")

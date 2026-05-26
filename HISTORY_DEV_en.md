@@ -5,7 +5,7 @@
 A project to port OpenDefocus (a Rust-based convolution library) from a Nuke NDK plugin to an OpenFX plugin.
 
 - Project root: `/Volumes/RAID/develop/ofx/oepndefocus_ofx`
-- Primary development platform: Rocky Linux 8.10 (x86_64)
+- Primary development platform: Rocky Linux 9.5 (x86_64) (Rocky Linux 8.10 through v0.1.10-OFX-v5)
 - macOS support added in Phase E (macOS 15.7 Sequoia, Intel x86_64)
 
 ## Version Management Rules
@@ -20,7 +20,7 @@ The ported version receives a `-OFX-v<revision>` suffix.
 - When only the OFX side is modified for the same original version, the revision is incremented
   - Example: OFX-side bug fix → `v0.1.10-OFX-v2`
 
-Current target: **OpenDefocus v0.1.10** → Ported version **v0.1.10-OFX-v5**
+Current target: **OpenDefocus v0.1.10** → Released **v0.1.10-OFX-v5**, dev **v0.1.10-OFX-v6-dev**
 
 ## Directory Structure
 
@@ -2225,21 +2225,236 @@ Windows (MinGW build) UAT completed. No issues found.
 - **Build**: `v0.1.10-OFX-v5-dev`, MinGW GCC 13.2.0, Rust stable-x86_64-pc-windows-gnu
 - **Result**: PASS — all tested scenarios passed without issues
 
+### 2026-04-04: v0.1.10-OFX-v5 Release
+
+Release complete.  Bundles generated for four platforms: Linux x86_64 / macOS arm64 / macOS x86_64 / Windows x86_64.
+
+**Changes shipped in v5:**
+- P1-3.3: Lazy renderer initialization
+- P1-3.6: Interactive/draft render optimization (OFX 1.4 forward compatibility)
+- eContextFilter clip guard
+- Failure logging (`od_create` / `render` / `od_render` — 3 paths)
+
+### 2026-04-13: Windows Toolchain Migration — Strawberry MinGW → MSYS2 UCRT64
+
+Migrated Windows build toolchain from Strawberry Perl's MinGW (GCC 13.2.0) to MSYS2 UCRT64 (GCC 15.2.0) for improved long-term maintainability.
+
+**Motivation:**
+- Strawberry Perl's MinGW is a C++ toolchain bundled as a Perl distribution accessory, with no independent maintenance plan
+- MSYS2 UCRT64 is an actively maintained Windows GNU environment with rolling GCC updates via pacman
+- GCC 15.2.0 provides better optimization, C++23 support, and more reliable COFF handling
+
+**Changes (`plugin/OpenDefocusOFX/CMakeLists.txt`):**
+- Removed `-Wa,-mbig-obj` workaround from WIN32 branch — no longer needed since protobuf-src is not compiled (system protoc via `protobuf-vendored` disable)
+- Removed `PATH` manipulation from `cmake -E env` — was causing Makefile parse errors due to Windows path semicolons expanding in Git Bash environment; cargo finds its own path via the inherited system PATH
+- Updated comments from "MinGW" to "MSYS2 UCRT64"
+
+**Build environment (new):**
+- MSYS2 UCRT64 GCC 15.2.0 (`C:/msys64/ucrt64/bin`)
+- `pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-make`
+- Build command: `PATH="/c/msys64/ucrt64/bin:$PATH" cmake ... && mingw32-make`
+
+**Build result:** 9.5 MB binary, GCC 15.2.0 (UCRT64)
+
+**Impact on Linux/macOS:** None.
+
+### 2026-05-23: Windows Static Runtime Linking
+
+Made the Windows `.ofx` bundle self-contained by statically linking the GCC C/C++ runtimes and winpthread.
+
+**Problem:**
+The MSYS2 UCRT64 build dynamically linked against MinGW runtime DLLs:
+- `libgcc_s_seh-1.dll`
+- `libstdc++-6.dll`
+
+These DLLs are not present on end-user host machines (NUKE / Flame / Resolve), so the plugin failed to load with "DLL not found" errors when the bundle was copied to a clean Windows machine without MSYS2 in PATH.
+
+**Fix (`plugin/OpenDefocusOFX/CMakeLists.txt`):**
+Added link options to the WIN32 branch:
+```cmake
+target_link_options(OpenDefocus PRIVATE
+    -static-libgcc
+    -static-libstdc++
+    -static)
+```
+
+**Verification (`objdump -p`):**
+- Before: `libgcc_s_seh-1.dll`, `libstdc++-6.dll` in import table
+- After: only Windows 10/11 system libraries (`KERNEL32.dll`, `ntdll.dll`, `api-ms-win-crt-*.dll` (UCRT), `OPENGL32.dll`, `bcryptprimitives.dll`)
+
+**Binary size:** 9.5 MB → 12.5 MB (+3.0 MB for statically-linked libstdc++).
+
+**Deployment:** The bundle (`bundle/OpenDefocusOFX.ofx.bundle/`) can now be copied directly to a Windows host without additional runtime installation.
+
+**Impact on Linux/macOS:** None.
+
+### 2026-05-24: Post-v5 Review Fixes — FFI Panic Protection Hardening
+
+Third-pass static review by the review team identified two HIGH-severity gaps in the FFI panic-protection coverage that were introduced by the v5 lazy-init refactor.  The implementation team verified the findings and the user approved the fix scope.
+
+#### Fix 1 (HIGH #1): wgpu device-probe panic protection
+
+**Problem:** v5's `ensure_renderer()` (lazy-init path) and `od_set_use_gpu()` (GPU toggle path) call `OpenDefocusRenderer::new()`, which probes the wgpu device.  On broken Vulkan / Metal drivers this probe can panic.  Neither call site was wrapped in `catch_unwind`, so a probe panic propagated across the FFI boundary into the host.
+
+**Fix:** Both call sites now wrap the `runtime.block_on(OpenDefocusRenderer::new(...))` call in `std::panic::catch_unwind(AssertUnwindSafe(...))`.  Probe failure converts to `OdResult::ErrorInitFailed` (lazy-init) or `OdResult::ErrorRenderFailed` + `gpu_failed = true` (toggle), matching the existing error-return contract.
+
+#### Fix 2 (HIGH #2): all-stripe GPU panic protection
+
+**Problem:** v5 wrapped only the first GPU stripe in `catch_unwind`, gated by a `is_first_gpu_stripe` flag.  Subsequent GPU stripes ran unprotected — a panic on stripe 2+ propagated to the host.
+
+**Fix:** Replaced the `is_first_gpu_stripe` flag with a per-stripe `inst.renderer.is_gpu() && !inst.gpu_failed` check.  All GPU stripes are now wrapped; CPU stripes remain unwrapped (safe-Rust panic = invariant violation, abort with full trace is preferred over swallowing).  The existing CPU-fallback retry path is reused for whichever stripe first triggers the GPU failure.
+
+#### Documentation fixes
+
+1. **Stale comment** at `OpenDefocusOFX.cpp:1050-1052` — referenced "fetchWindow X may have been trimmed to cap bufWidth", but X-axis trimming was removed in v4.  Rewritten to describe the actual invariant (`fetchWindow.x1/x2 == rw.x1/x2`) and note that the overscan branches are defensive dead code.
+2. **RoD non-negative origin invariant** at `OpenDefocusOFX.cpp:1006` — added inline comment documenting that `static_cast<int>(rod.x1 * renderScale)` truncates toward zero, so a host with a negative RoD origin would drift the RoD anchor by up to 1 px.  Currently safe on NUKE / Flame; re-validate when adding Resolve / Fusion to the host matrix.
+3. **macOS Intel deprecated-path deviation** at `plugin/OpenDefocusOFX/CMakeLists.txt:178-184` — added comment noting that Intel binaries ship to the OFX 1.5-deprecated `MacOS-x86-64/` directory pending universal-binary migration; strict OFX 1.5 hosts may fail to discover Intel until lipo-based output lands.
+
+#### Fix 3 (LOW #1, follow-up): CPU-renderer creation symmetry
+
+**Problem:** After the HIGH #1 / #2 hardening, two remaining CPU-renderer creation sites were still uncovered: (a) the lazy-init "GPU-previously-failed" path in `od_render` (lib.rs:~1196), and (b) the stripe-loop CPU fallback after a GPU panic (lib.rs:~1412).  CPU adapter creation rarely panics, but the asymmetry meant the bridge was not uniformly protected.
+
+**Fix:** Both sites now wrap `runtime.block_on(OpenDefocusRenderer::new(false, ...))` in `catch_unwind`.  A panic converts to `OdResult::ErrorRenderFailed`, matching the existing error-return contract.  Every renderer-creation path on the bridge is now panic-safe.
+
+#### Fix 4 (LOW #2, follow-up): GPU toggle state consistency
+
+**Problem:** `od_set_use_gpu()` set `inst.settings.render.use_gpu_if_available = use_gpu` *before* the wgpu probe.  When the probe failed, the canonical setting reflected the requested mode while the renderer state did not — the `gpu_failed` flag rescued the user-visible state (`od_is_gpu_active()` reads `is_gpu() && !gpu_failed`) but the internal invariant was asymmetric.
+
+**Fix:** The probe now runs against a temporary `new_settings` clone with the requested mode applied; `inst.settings.render.use_gpu_if_available` is updated only after a successful probe.  Probe failure leaves the canonical setting consistent with the still-active renderer.
+
+#### Items intentionally deferred
+
+- **HIGH #3** (global abort race) — fix requires upstream kernel API for per-instance abort.  Conflicts with the no-upstream-modification policy; kept in backlog as "Fine-grained abort Phase 2".
+- **HIGH #7** (macOS universal binary) — deferred to next major release.
+- **HIGH #6** (CMake `BYPRODUCTS`) — queued for next revision (cosmetic Ninja warning only).
+- **M9** (`Cargo.lock` tracking) — queued for next revision.
+
+### 2026-05-25: Fusion Studio (Linux standalone) Compatibility — OfxSetHost stub (Known Issue #26 candidate fix)
+
+Standalone Fusion Studio on Linux had been deferred since 2026-03-26 as Known Issue #26 ("plugin scanner rejects the bundle before standard OFX handshake"; DaVinci Resolve loads it correctly).  An `LD_DEBUG=files` trace on Rocky Linux 9.5 against Fusion 20 finally pinned the root cause:
+
+```
+/usr/OFX/Plugins/OpenDefocusOFX.ofx.bundle/.../OpenDefocusOFX.ofx: error:
+  symbol lookup error: undefined symbol: OfxSetHost (fatal)
+```
+
+OFX 1.5 spec lists `OfxSetHost` as an *optional* C entry point — NUKE / Flame / DaVinci Resolve all tolerate its absence and rely on the `OfxPlugin::setHost` member callback that the C++ Support library wires up.  Standalone Fusion Studio's loader instead `dlsym`-looks-up the symbol and treats its absence as fatal.
+
+**Fix:** Exported a no-op `OfxSetHost` stub at the bottom of `plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`:
+
+```cpp
+extern "C" __attribute__((visibility("default")))
+OfxStatus OfxSetHost(const OfxHost* /*host*/) {
+    return kOfxStatOK;
+}
+```
+
+Notes:
+- `OfxExport` is `#define OfxExport extern` on Linux and does not add a visibility attribute; the bundle is built with `-fvisibility=hidden`, so an explicit `default` visibility is required (matching the `EXPORT` macro used by the Support library for `OfxGetNumberOfPlugins` / `OfxGetPlugin`).
+- A `_WIN32` branch uses `__declspec(dllexport)` to keep the symbol visible on the MSYS2 UCRT64 build.
+- The C++ Support library's host capture (`OfxPlugin::setHost = OFX::Private::setHost` in `ofxsImageEffect.cpp:3026`) is unchanged.  OFX 1.5 spec orders the calls as: (1) `OfxSetHost`, (2) `OfxGetNumberOfPlugins`, (3) `OfxGetPlugin`, (4) `OfxPlugin::setHost`.  Step (4) still runs on every host, so the canonical wiring is preserved on NUKE / Flame / Resolve.
+- Return value is `kOfxStatOK` (the conventional success return for entry points).  The original draft used `kOfxStatReplyDefault`, but two independent external reviews flagged this as the only Flame-side ambiguity — `ofxCore.h` documents `kOfxStatReplyDefault` primarily for mainEntry actions, which could give a strict host room to reject a non-OK return from `OfxSetHost`.  `kOfxStatOK` removes that interpretive risk at zero implementation cost.
+
+**Verification:**
+- `nm -D --defined-only ...` confirms `T OfxSetHost` is now in the dynamic symbol table.
+- UAT must verify on standalone Fusion Studio Linux (load + render) AND confirm no regression on NUKE / Flame / Resolve.
+
+**Known Issue #26 status (initial assessment):** Promoted from `DEFERRED` to `RESOLVED (pending Fusion Studio Linux UAT)`.
+
+**Follow-up actions:**
+- **BMD upstream bug report**: File a Fusion Studio Linux defect against BMD citing OFX 1.5 spec (`OfxSetHost` is optional per `ofxLoadingSequence.rst:10` and `relnotes-1.5.rst:44`) and attach the `LD_DEBUG=files` trace.  Resolution would let downstream OFX plugins drop the stub; until then the shim is the cheapest interim fix.  Status: not yet filed — assignee and date to be recorded once submitted.
+- **KI#27 candidate — second-shoe-drops sweep**: One `LD_DEBUG=symbols` run against Fusion Studio Linux loading the current plugin to confirm no *other* OFX 1.5 optional symbol triggers the same "fatal on absence" behavior.  If any do, decide stub-vs-skip per symbol.
+
+### 2026-05-25: KI#26 Stage 2 — Visibility Leak Fix
+
+The Stage 1 OfxSetHost stub above turned out to be necessary but not sufficient.  When the user retested Fusion Studio Linux with the new bundle, the same generic "failed to load" dialog appeared, but `LD_DEBUG=files` showed a different shape: `dlopen` succeeded, `init` was called, and then Fusion immediately called `fini` and unloaded the bundle.  No `undefined symbol` error this time — the rejection was silent and post-handshake.  The reviewer-flagged "second-shoe-drops" risk had materialized.
+
+**Diagnosis.** A side-by-side comparison with `smooth.ofx` (a plugin Fusion accepts) exposed a massive structural divergence:
+
+| Metric | `smooth.ofx` (accepted) | `OpenDefocusOFX.ofx` (rejected) |
+|--------|-------------------------|---------------------------------|
+| Dynamic `T` exports | 3 | **2725** |
+| Undefined symbols | 76 | 179 |
+
+`OpenDefocusOFX.ofx` was leaking the entire OFX Support library namespace (`OFX::ImageEffect`, `OFX::GroupParam`, etc.), all of libstdc++'s `std::__cxx11::*` template instantiations the Support library brought in, and every `od_*` C function from the Rust FFI bridge.  Two root causes:
+
+1. **OFX Support library compiled without hidden visibility.**  Even though the bundle target had `CXX_VISIBILITY_PRESET hidden`, the `OfxSupport` static-library target did not — so its translation units were produced with default visibility.  When linked into the bundle, those default-visibility symbols were promoted to dynamic exports regardless of the bundle's own visibility setting.
+2. **Rust `extern "C"` exports default to public visibility.**  The Rust FFI bridge's `od_*` functions had no way to be hidden via CMake visibility presets.
+
+**Fix.** Two pieces, both confined to the build configuration:
+
+1. `set_target_properties(OfxSupport PROPERTIES … C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)` — applied at the OfxSupport target definition.  Reduced exports to 2099.
+2. A linker version script (`plugin/OpenDefocusOFX/OpenDefocusOFX.exports`) wired into the Linux link line via `-Wl,--version-script=…`.  The script's `global:` list contains exactly the three OFX entry points; everything else falls into `local:`:
+
+```
+{
+    global:
+        OfxGetNumberOfPlugins;
+        OfxGetPlugin;
+        OfxSetHost;
+    local:
+        *;
+};
+```
+
+The version script trumps any visibility attribute on static-library symbols, so this works even though Rust's `extern "C"` defaults to default visibility.  The intermediate attempt of `-Wl,--exclude-libs,ALL` was tried first but rejected because it also strips the OFX Support library's deliberately-`EXPORT`-marked `OfxGetNumberOfPlugins` / `OfxGetPlugin`, leaving only `OfxSetHost` visible (which would have broken every host, including the ones that work today).
+
+**Verification.**
+- `nm -D --defined-only OpenDefocusOFX.ofx | grep ' T '` now shows exactly the three OFX entry points — matching `smooth.ofx`'s export profile.
+- Binary size dropped from 10,973,600 to 10,603,064 bytes (~370 KB of removed export metadata).
+- `dlopen` test still resolves `OfxGetNumberOfPlugins` / `OfxGetPlugin` and reports `count=1`.
+- Fusion Studio Linux now loads the bundle without an error dialog, the `v0.1.10-OFX-v6-dev` parameter is visible, and 2D / Depth / GPU rendering all work (UAT 40.1 / 40.2).
+- NUKE Linux + Flame Linux UAT 40.3 all PASS; Flame stderr shows `describe(), plugin: v0.1.10-OFX-v6-dev`, lazy init / GPU↔CPU toggle logs are normal, no `caught panic` traces.
+- DaVinci Resolve Studio UAT 40.4 PASS on both the Fusion Page and the Color Page.
+
+**Why this affected Fusion but not the other hosts.**  All Linux OFX hosts load plugins with `RTLD_NOW | RTLD_GLOBAL`.  NUKE / Flame / Resolve evidently tolerate a high export count silently; standalone Fusion Studio appears to apply additional post-load sanity checks (likely intended to detect symbol-namespace pollution between plugins) that reject bundles exporting more than the spec-required entry points.  The relocation-dependency lines in the original `LD_DEBUG=files` trace (`OpenDefocusOFX.ofx ... needed by DaVinci Resolve Renderer.ofx (relocation dependency)`) were the clue that cross-plugin symbol bleed was occurring; the version script eliminates the bleed entirely.
+
+**Known Issue #26 status (final):** `DEFERRED` → **`RESOLVED (Linux)`**.  macOS and Windows UAT (40.5 / 40.6) remain to confirm no regression on those platforms before declaring full resolution.
+
+**Lesson learned (for the porting playbook).** When a plugin uses both a C++ Support library and a Rust FFI staticlib, applying `CXX_VISIBILITY_PRESET hidden` only at the bundle target is insufficient — the static-library targets need the same property, and the Rust FFI exports need a version script (or equivalent) because their `extern "C"` linkage defaults to public visibility.  This pattern likely applies to any OpenFX plugin combining C++ Support with non-C++ static libraries; consider documenting it in the porting setup notes (`references/OpenDefocus_OFX_移植セットアップ_2章分離.md`) for future ports.
+
+#### kDevVersion
+
+`v0.1.10-OFX-v6-dev`
+
+### 2026-05-26: Windows UAT — Section 39 (MSYS2 UCRT64 + Static Runtime) — 9/9 PASS
+
+Windows manual UAT completed for the v6-dev toolchain migration and static runtime linking.  All nine Windows-side items pass; 39.4 cross-OS spot-checks remain.
+
+**Test environment:**
+- Dev PC (build host): Windows 11 + MSYS2 UCRT64 GCC 15.2.0 + Rust `stable-x86_64-pc-windows-gnu`
+- Clean PC (deployment target): Windows 11 — neither MSYS2 nor Strawberry MinGW present in PATH
+- Hosts: NUKE 16, Fusion Studio 20
+
+**Results (all PASS, 2026-05-26):**
+- **39.1 Bundle self-containment (3/3)**: bundle 12,471,117 bytes (12.47 MB); `objdump -p` import table contains only Windows 10/11 system libraries (no `libgcc_s_seh-1.dll` / `libstdc++-6.dll` / `libwinpthread-1.dll`); Fusion Studio 20 and NUKE 16 both loaded the plugin on the clean PC.
+- **39.2 NUKE Windows rendering (5/5)**: 2D mode, Depth mode, GPU (2D / Depth / UHD), 50-frame batch write-out in Depth mode (exceeds the 24-frame baseline and simultaneously covers 39.2.2), no shutdown crash.
+- **39.3 Fusion Studio Windows rendering (2/2)**: basic 2D / Depth / GPU rendering, no shutdown crash.
+
+**v6 release blockers (39.1.1 / 39.1.3) cleared.**
+
+**Remaining (39.4):** Linux Rocky 9.5 (39.4.1) and macOS Intel (39.4.2) spot-checks.  These are a cross-OS regression sanity check; the static-link change is scoped to the `elseif(WIN32)` branch of `plugin/OpenDefocusOFX/CMakeLists.txt` and is unreachable from non-Windows builds, so any regression there would have to come from the v6 merge (FFI panic hardening or the Fusion Studio Linux export-script fix), not from the Windows work.  The Linux / macOS dev repos will pick the state up after the push.
+
 ### Current Status
 
 - **Phase 1–11 (OFX Port)**: Complete, UAT complete (master branch)
 - **macOS Support**: Complete, v0.1.10-OFX-v3 released (Linux + macOS)
-- **Windows Support**: Complete, UAT passed (Fusion Studio, v5-dev)
+- **Windows Support**: v6-dev MSYS2 UCRT64 + static runtime — Section 39 Windows manual UAT 9/9 PASS (NUKE 16 + Fusion Studio 20 on a clean Windows 11 PC); 39.4 cross-OS spot-checks pending
 - **P0 Stability Fixes**: Complete (per-instance abort, GPU toggle, depth fetch throttling)
 - **P1 Improvements**: Complete (lazy renderer init, draft render optimization, eContextFilter guard, failure logging)
+- **FFI Panic Protection**: Hardened in v6-dev — every renderer-creation path (lazy-init, GPU toggle, lazy-init CPU fallback, stripe-loop CPU fallback) and every GPU stripe wrapped in `catch_unwind`
+- **Fusion Studio (Linux standalone)**: Known Issue #26 **RESOLVED** in v6-dev (Linux verified) — two-stage fix: (1) OfxSetHost stub, (2) `OpenDefocusOFX.exports` linker version script reducing dynamic exports from 2725 to 3. macOS / Windows verification pending. NUKE / Flame / DaVinci Resolve Studio confirmed pixel-identical to v5 on Linux
 - **Thread Safety**: eRenderUnsafe → eRenderInstanceSafe (all platforms)
 - **LTO Optimization**: Applied (`lto = "thin"`, `codegen-units = 1`)
-- **Current dev version**: `v0.1.10-OFX-v5-dev`
+- **Released version**: `v0.1.10-OFX-v5` (2026-04-04)
+- **Current dev version**: `v0.1.10-OFX-v6-dev`
 
 ### Next Steps
 
-1. **v0.1.10-OFX-v5 release**: Windows + P1 improvements
-2. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
-3. **Open test feedback**: Monitor and respond to tester reports
-4. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
-5. **GPU toggle state feedback** (backlog): When `od_set_use_gpu()` fails, settings and actual renderer state diverge; consider UI feedback or settings rollback
+1. **v0.1.10-OFX-v6 release planning**: Bundles Windows MSYS2 UCRT64 toolchain, Windows static runtime linking, and post-v5 FFI panic hardening
+2. **Next-revision items**: M9 (Cargo.lock tracking), HIGH #6 (CMake `BYPRODUCTS`)
+3. **Upstream Issue reporting**: Submit Issues for #1-4, #6-7, #18, #19, #23, #25 to codeberg.org/gillesvink/opendefocus
+4. **Open test feedback**: Monitor and respond to tester reports
+5. **Fine-grained abort** (LOW): Phase 2 — async polling for mid-stripe cancellation
+6. **GPU toggle state feedback** (backlog): When `od_set_use_gpu()` fails, settings and actual renderer state diverge; consider UI feedback or settings rollback
+7. **macOS universal binary** (next major): lipo-based output to satisfy OFX 1.5 spec-strict hosts

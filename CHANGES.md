@@ -1,5 +1,35 @@
 # Changelog — OpenDefocus OFX
 
+## Unreleased
+
+### Stability
+
+- **FFI panic protection (HIGH #1)**: `ensure_renderer()` and `od_set_use_gpu()` now wrap the wgpu device probe in `catch_unwind`. A panic from broken GPU drivers no longer crosses the FFI boundary into the host.
+- **FFI panic protection (HIGH #2)**: All GPU stripes (not just the first) are now wrapped in `catch_unwind` with CPU fallback. Previously only the first GPU stripe was protected; a panic on stripe 2+ would have propagated to the host.
+- **FFI panic protection (LOW #1, symmetry)**: The two remaining CPU-renderer creation sites (lazy-init GPU-previously-failed path and stripe-loop CPU fallback) are now also wrapped in `catch_unwind`. CPU adapter creation rarely panics, but the wrap closes the last gap so every renderer-creation path on the bridge is protected.
+- **GPU toggle state consistency (LOW #2)**: `od_set_use_gpu()` no longer mutates `inst.settings.render.use_gpu_if_available` before the device probe. The canonical setting is now updated only after a successful probe, so a failed probe leaves the instance in a state consistent with the still-active renderer.
+
+### Build
+
+- **Windows: self-contained bundle**: The Windows `.ofx` now statically links libgcc / libstdc++ / libwinpthread. The bundle can be deployed to NUKE / Flame / Resolve hosts without installing MSYS2 UCRT64 runtimes. Binary size: 9.5 MB → 12.5 MB.
+- **Windows toolchain**: Migrated from Strawberry MinGW (GCC 13.2.0) to MSYS2 UCRT64 (GCC 15.2.0) for actively-maintained Windows GNU toolchain support.
+
+### Compatibility
+
+- **Fusion Studio (Linux standalone) load failure resolved (Known Issue #26)**: Two-stage fix.
+  - **Stage 1 — OfxSetHost stub.** OFX 1.5 marks this entry point as optional and the C++ Support library does not provide it, but standalone Fusion Studio Linux's loader treats its absence as fatal (`undefined symbol: OfxSetHost`).  A no-op stub returning `kOfxStatOK` resolves the symbol-resolution failure.  The stub gets explicit `default` visibility to override the bundle-wide `-fvisibility=hidden`.
+  - **Stage 2 — visibility leak fix.** Stage 1 alone was insufficient: Fusion's loader also rejected the bundle on a second, silent grounds.  The `.ofx` was leaking ~2700 symbols (OFX Support library `OFX::*`, libstdc++ `std::__cxx11::*`, and the Rust FFI bridge's `od_*` exports) because (a) the OFX Support static library was compiled without `-fvisibility=hidden`, and (b) Rust `extern "C"` exports default to public visibility.  Two changes restore parity with plugins Fusion already accepts (smooth.ofx exports only 3 symbols):
+    - `CXX_VISIBILITY_PRESET hidden` added to the `OfxSupport` static-library target.
+    - A linker version script (`plugin/OpenDefocusOFX/OpenDefocusOFX.exports`) is wired into the Linux link line; only `OfxGetNumberOfPlugins`, `OfxGetPlugin`, and `OfxSetHost` remain in the dynamic symbol table.  Windows PE/COFF only exports `__declspec(dllexport)` symbols by default, so no version script is needed there.
+  - **Verified on Linux**: Fusion Studio loads + renders normally; NUKE, Flame, and DaVinci Resolve Studio (Fusion Page + Color Page) are pixel-identical to v5.  macOS and Windows hosts remain to be UAT'd on the respective platforms before the v6 release.
+  - **Bundle export profile**: 2725 → 3 dynamic `T` exports; binary size −370 KB from removed export metadata.
+
+### Documentation
+
+- Documented the non-negative RoD origin invariant assumed by `static_cast<int>` truncation (NUKE / Flame only; re-validate when adding Resolve / Fusion).
+- Documented the macOS Intel deprecated-path deviation (Intel ships to `MacOS-x86-64` pending universal binary migration in the next major release).
+- Removed stale comment about fetchWindow X-axis trimming (no longer applicable after the X-overscan removal in v4).
+
 ## v0.1.10-OFX-v5 (2026-04-04)
 
 ### Performance Improvements

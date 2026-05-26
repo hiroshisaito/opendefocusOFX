@@ -1,4 +1,4 @@
-# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v4
+# UAT Checklist — OpenDefocus OFX v0.1.10-OFX-v6-dev
 
 ## Test Environment
 
@@ -6,7 +6,7 @@
 |------|---------|
 | OFX Plugin | `bundle/OpenDefocusOFX.ofx.bundle/Contents/<arch>/OpenDefocusOFX.ofx` |
 | Reference | OpenDefocus Nuke NDK v0.1.10 |
-| OS (Linux) | Rocky Linux 8.10 (x86_64) |
+| OS (Linux) | Rocky Linux 9.5 (x86_64) |
 | OS (macOS) | macOS 15.7 Sequoia (Intel x86_64) — Phase E |
 | OFX Host | NUKE 16.0, Flame 2026 |
 | Test Date | Feb 25 2026 |
@@ -512,6 +512,314 @@ Test environment: Flame (Linux)
 | 37.7 | 2D mode | PASS | |
 | 37.8 | Depth mode | PASS | |
 | 37.9 | 4K+ render | PASS | |
+
+---
+
+## 38. v0.1.10-OFX-v6-dev UAT — FFI Panic Protection Hardening + GPU Toggle State Consistency
+
+Test environment: NUKE / Flame (Linux); additional optional: NUKE (macOS arm64 / x86_64)
+
+**Scope:**
+Focused on the code paths changed since v5.  Not a full feature re-run — this cycle validates the `catch_unwind` coverage and the GPU-toggle state machine invariant, and screens for regressions in existing functionality.
+
+**v6-dev changes covered:**
+- HIGH #1: `catch_unwind` protection around the wgpu device probe in `ensure_renderer()` / `od_set_use_gpu()`
+- HIGH #2: `catch_unwind` protection around every GPU stripe (the `is_first_gpu_stripe` flag was removed)
+- LOW #1: `catch_unwind` protection around the lazy-init "GPU previously failed" path and the stripe-loop CPU fallback creation
+- LOW #2: `od_set_use_gpu` no longer mutates `use_gpu_if_available` before the probe — the canonical setting is updated only after a successful probe
+
+**Prerequisite:** Confirm the `kDevVersion` display reads `v0.1.10-OFX-v6-dev` before starting.  The `-dev` suffix is dropped only after this UAT passes.
+
+### 38.1 Plugin Load & Health Check
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.1.1 | Plugin loads in NUKE / Flame (Linux) | | OpenDefocusOFX appears in the Defocus menu with no error log |
+| 38.1.2 | kDevVersion displayed | | Top of Controls page shows `v0.1.10-OFX-v6-dev` |
+| 38.1.3 | Node creation speed (lazy-init effect) | | Ten consecutive node creations feel instant (no wgpu probe) |
+
+### 38.2 Lazy Initialization (HIGH #1)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.2.1 | Lazy init fires on the first render | | `Lazy-initializing renderer (GPU=true)` log appears |
+| 38.2.2 | No re-init on subsequent renders | | After a parameter change, the `Lazy-initializing` log does not appear again |
+| 38.2.3 | Node created with UseGPU=false → first render | | `Lazy-initializing renderer (GPU=false)` log; CPU renderer is created |
+
+### 38.3 GPU / CPU Basic Rendering (Regression)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.3.1 | HD GPU render (1920×1080, Size=50) | | Pixel-identical to v5 (A/B compare) |
+| 38.3.2 | UHD GPU render (3840×2160) | | Passes through multiple stripes with no seams |
+| 38.3.3 | UHD CPU render (UseGPU=false) | | Output is correct |
+| 38.3.4 | 5K+ GPU render (5120×2700+) | | Many stripes traversed, no crash |
+
+### 38.4 GPU Toggle State Consistency (LOW #2 focus)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.4.1 | GPU on → off → on cycle | | Each toggle logs `Renderer recreated: GPU/CPU`; output is correct |
+| 38.4.2 | UseGPU toggled during loop playback | | Playback continues; new mode applies from the next frame |
+| 38.4.3 | GPU state feedback consistency | | UI display (DeviceName, etc.) matches the actual renderer state |
+| 38.4.4 | Toggle stress (10 consecutive toggles) | | All toggles succeed; no memory leak (create/destroy a node 10 times while watching memory) |
+
+### 38.5 Stripe Rendering (HIGH #2 path)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.5.1 | Quality=Low / Medium / High (UHD) | | No seams at any quality |
+| 38.5.2 | Position-dependent effects across stripes | | Catseye Amount=2.0 / Barndoors Amount=1.0 / Astigmatism — no boundary seams |
+| 38.5.3 | Depth mode + stripes (UHD) | | Depth defocus is consistent across all stripes when FocalPlaneSetup varies |
+| 38.5.4 | Proxy mode (1/2, 1/4) | | renderScale applied; output correct |
+
+### 38.6 GPU → CPU Fallback (HIGH #2 + LOW #1)
+
+Hard to trigger in normal operation.  Run the items that are reachable; mark the others N/A.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.6.1 | Explicit CPU lazy init (UseGPU=false) | | `Lazy-initializing renderer (GPU=false)` → CPU created, no error |
+| 38.6.2 | GPU-previously-failed path | | Mark N/A if unreachable.  When it fires: `GPU previously failed, recreating renderer as CPU-only` log, CPU completes the render |
+| 38.6.3 | Mid-stripe CPU fallback | | Mark N/A if unreachable.  When it fires: `GPU stripe render ... — switching to CPU` log → remaining stripes complete on CPU with no seams |
+
+### 38.7 Parallel Instance Rendering (Regression)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.7.1 | Two parallel instances (Branch + Comp) | | No cross-contamination |
+| 38.7.2 | Per-instance abort isolation | | Aborting one instance does not propagate to the other (per-instance abort behavior) |
+
+### 38.8 eContextFilter Guard (continued from v5)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 38.8.1 | eContextGeneral normal operation (Depth clip connected / unconnected) | | Works normally; no context-related errors |
+| 38.8.2 | eContextFilter context | | NUKE / Flame do not use Filter context, so this is effectively a regression check |
+
+### 38.9 Log Monitoring Points
+
+Expected logs (success path):
+```
+[INFO] Lazy-initializing renderer (GPU=true)
+[INFO] Renderer created: GPU
+[INFO] Renderer recreated: GPU/CPU
+```
+
+Watch-out logs (should not appear; record details if they do):
+```
+[ERROR] ensure_renderer: caught panic during renderer init
+[ERROR] od_set_use_gpu: caught panic during renderer recreation
+[ERROR] GPU stripe render panicked
+[ERROR] od_render: caught panic during CPU fallback renderer creation
+```
+If any appear → `catch_unwind` worked correctly (crash avoided), but the underlying driver / host condition still needs investigation.
+
+### 38.10 PASS Criteria
+
+- 38.1 – 38.5, 38.7, 38.8: **all items must PASS** (any regression blocks the v6 release)
+- 38.6: 38.6.1 must PASS; 38.6.2 / 38.6.3 may be N/A (environment-dependent)
+- If any watch-out log appears, hold the verdict and investigate
+
+### 38.11 Common Prep
+
+1. Place the v6-dev bundle under `bundle/OpenDefocusOFX.ofx.bundle/`
+2. Configure the plugin path (Flame: `/opt/Autodesk/sw_app_<version>/usr/.../OFX/`; NUKE: `~/.nuke/OFX/Plugins/`)
+3. Enable log output before launching the host
+   - Flame: `tail -f /opt/Autodesk/log/Flame_*.log`
+   - NUKE: launch from a terminal and watch stderr
+4. At the start of each session, confirm `v6-dev` via 38.1.2 (kDevVersion display)
+5. Keep the v5 bundle at a separate path for A/B comparison renders
+
+---
+
+## 39. v0.1.10-OFX-v6-dev UAT — Windows MSYS2 UCRT64 Toolchain + Static Runtime
+
+Test environment:
+- Windows 11 (development PC with MSYS2 UCRT64 installed)
+- Windows 11 (clean PC with neither MSYS2 nor Strawberry MinGW installed)
+- Linux Rocky 9.5 (regression only)
+- macOS 15.7 Intel (regression only)
+- Hosts: NUKE 16.0, Fusion Studio
+
+**Scope:**
+- Toolchain migration (Strawberry MinGW GCC 13.2.0 → MSYS2 UCRT64 GCC 15.2.0)
+- Static runtime linking (libgcc / libstdc++ / libwinpthread)
+- Bundle self-containment and Windows-side behavioral regression
+
+**v6-dev changes covered:**
+- commit `9606b5c`: Windows toolchain → MSYS2 UCRT64 GCC 15.2.0
+- commit `3737545`: `-static-libgcc -static-libstdc++ -Wl,-Bstatic,-lwinpthread` for static linking
+
+**Prerequisite:** Confirm the Windows build is `v0.1.10-OFX-v6-dev` and the bundle size is approximately 12.5 MB (v5 + 3 MB) before starting.
+
+### Execution Record
+
+Fill in as the UAT progresses. The auto-checkable rows (39.1.2 / 39.1.3) are already populated.
+
+| Field | Value |
+|-------|-------|
+| Tester | _(name)_ |
+| Execution date range | _start_ — _end_ |
+| Build commit (dev PC) | `2c80d11` (master HEAD after v6 pull) |
+| Bundle path | `bundle/OpenDefocusOFX.ofx.bundle/Contents/Win64/OpenDefocusOFX.ofx` |
+| Bundle SHA-256 | _(optional; run `sha256sum` on the .ofx)_ |
+| Dev PC (build host) | Windows 11 + MSYS2 UCRT64 GCC 15.2.0 + Rust stable-x86_64-pc-windows-gnu |
+| Clean PC (39.1.1) | Windows 11 clean install — neither MSYS2 nor Strawberry MinGW present |
+| NUKE version (39.2) | NUKE 16 |
+| Fusion version (39.3) | Fusion Studio 20 |
+| Linux env (39.4) | _e.g. Rocky 9.5 + Flame 2026.1_ |
+| macOS env (39.4) | _e.g. macOS 15.7 Intel + NUKE 16.0v3_ |
+| v5 bundle for A/B (path) | _(optional; v5 .ofx kept at separate path for comparison renders)_ |
+
+### 39.1 Windows Bundle Self-Containment
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.1.1 | Bundle is recognized on a clean Windows 11 PC | PASS (2026-05-26) | Installed on clean Windows 11 PC (no MSYS2 / no Strawberry MinGW). Both Fusion Studio 20 and NUKE 16 loaded the plugin and launched successfully |
+| 39.1.2 | Bundle size ~12.5 MB | PASS (2026-05-26) | 12,471,117 bytes = 12.47 MB (decimal) / 11.89 MiB (binary). +3 MB from v5 confirms static linking took effect. Verified via `stat -c%s` on dev PC |
+| 39.1.3 | `dumpbin /dependents` shows no libgcc / libstdc++ / libwinpthread DLL dependencies | PASS (2026-05-26) | Verified via `objdump -p` on dev PC. Import table contains only Windows 10/11 system libraries (KERNEL32, ntdll, api-ms-win-crt-* (UCRT), OPENGL32, bcryptprimitives, api-ms-win-core-synch). None of libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll appear |
+
+### 39.2 Windows Rendering Regression (NUKE)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.2.1 | 2D mode render completes normally | PASS (2026-05-26) | Output matches v5 (Strawberry MinGW) |
+| 39.2.2 | Depth mode render completes normally | PASS (2026-05-26) | Covered by 39.2.4 (50-frame batch write-out was executed in Depth mode). Output matches v5 |
+| 39.2.3 | GPU render completes normally (2D / Depth / UHD) | PASS (2026-05-26) | GCC 15 + wgpu integration confirmed |
+| 39.2.4 | Write-node batch render (24 frames) completes | PASS (2026-05-26) | 50-frame write-out in NUKE Depth mode (exceeds the 24-frame baseline; simultaneously satisfies 39.2.2). No thread-safety regression |
+| 39.2.5 | No crash on NUKE shutdown | PASS (2026-05-26) | No destruction-order issues from static linking |
+
+### 39.3 Windows Rendering Regression (Fusion Studio)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.3.1 | Basic 2D / Depth / GPU rendering | PASS (2026-05-26) | Verified on Fusion Studio 20 (Windows). Output matches v5 |
+| 39.3.2 | No crash on Fusion shutdown | PASS (2026-05-26) | Verified on Fusion Studio 20 (Windows) |
+
+### 39.4 Other OS Regression (Toolchain Change Impact)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 39.4.1 | Linux Rocky 9.5: spot-check primary scenarios through Phase 37 | | Dual baseline: Windows-toolchain regression check AND Rocky 8.10 → 9.5 dev/test OS migration regression check (prior phases were tested on 8.10) |
+| 39.4.2 | macOS Intel: spot-check primary scenarios | | Toolchain change has no impact on macOS build |
+
+### 39.5 PASS Criteria
+
+- 39.1 / 39.2: **all items must PASS** (especially 39.1.1 / 39.1.3 — v6 release blockers)
+- 39.3: all items must PASS (any FAIL in Fusion Studio holds the verdict)
+- 39.4: PASS if behavior matches v5 (spot-check is sufficient)
+
+### 39.6 Common Prep
+
+1. Build the Windows v6-dev bundle on the development PC (`cargo build --release` → CMake)
+2. Copy the ~12.5 MB bundle to a clean Windows 11 PC (USB / shared folder, etc.)
+3. Run `dumpbin /dependents OpenDefocusOFX.ofx` on the clean PC (requires Visual Studio Build Tools or Windows SDK)
+4. Launch NUKE / Fusion on the clean PC with log output enabled
+5. Keep the v5 bundle in parallel for A/B comparison renders
+
+---
+
+## 40. v0.1.10-OFX-v6-dev UAT — Fusion Studio (Linux standalone) Compatibility (Known Issue #26 candidate fix)
+
+Test environment: Linux Rocky 9.5 + BMD Fusion Studio (standalone); Linux Rocky 9.5 + Flame / NUKE / DaVinci Resolve Studio (regression)
+
+**Scope:**
+Verifies the resolution of Known Issue #26 (Fusion Studio Linux plugin-load failure, deferred since v0.1.10-OFX-v1) and confirms no regression on NUKE / Flame / DaVinci Resolve Studio.
+
+**v6-dev changes covered:**
+- No-op `OfxSetHost` stub added at the bottom of `plugin/OpenDefocusOFX/src/OpenDefocusOFX.cpp`
+- `__attribute__((visibility("default")))` overrides the bundle-wide `-fvisibility=hidden`
+- `_WIN32` branch uses `__declspec(dllexport)`
+
+**Prerequisite:**
+- Confirm `nm -D --defined-only OpenDefocusOFX.ofx | grep OfxSetHost` shows `T OfxSetHost` before starting
+- kDevVersion is still `v0.1.10-OFX-v6-dev`
+
+### 40.1 Fusion Studio Linux Load Verification (Known Issue #26 resolution)
+
+Test date: 2026-05-25, Tester: Hiroshi
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.1.1 | No error alert on Fusion Studio launch | PASS | After applying both the OfxSetHost stub and the visibility fix, the "failed to load" dialog no longer appears |
+| 40.1.2 | OpenDefocusOFX appears in the tool menu | PASS | Selectable; node creation succeeds |
+| 40.1.3 | LD_DEBUG=files no longer shows the OfxSetHost error | PASS | symbol-lookup error gone.  The implicit-rejection second stage was resolved by the visibility fix |
+
+### 40.2 Fusion Studio Linux Basic Rendering
+
+Test date: 2026-05-25, Tester: Hiroshi
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.2.1 | Node creation and parameter display | PASS | Controls page shows `v0.1.10-OFX-v6-dev` |
+| 40.2.2 | 2D mode (Depth disconnected) basic render | PASS | Verified at Size=10–60, Quality Low/High toggle, Filter Type switching |
+| 40.2.3 | Depth mode basic render | PASS | Use Focus Point operation verified |
+| 40.2.4 | GPU / CPU toggle | PASS | UseGPU toggle switches modes successfully |
+
+### 40.3 NUKE / Flame Regression (critical — verifies the Flame UAT is unaffected)
+
+The OFX 1.5 spec call order is: (1) OfxSetHost → (2) OfxGetNumberOfPlugins → (3) OfxGetPlugin → (4) OfxPlugin::setHost.  This fix only adds a no-op step (1); step (4) is unchanged.  NUKE / Flame behavior should be identical, but verify explicitly.
+
+Test date: 2026-05-25, Tester: Hiroshi
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.3.1 | NUKE Linux: plugin loads | PASS | No startup error; node appears in the menu |
+| 40.3.2 | NUKE Linux: basic rendering (2D / Depth / GPU) | PASS | Pixel-identical to v5 |
+| 40.3.3 | Flame Linux: plugin loads | PASS | No error alert; OpenDefocus appears in the media hub |
+| 40.3.4 | Flame Linux: basic rendering (2D / Depth / GPU) | PASS | Pixel-identical to v5.  stderr: `describe(), plugin: v0.1.10-OFX-v6-dev` confirmed; lazy-init / GPU↔CPU toggle logs normal; no `caught panic` traces |
+| 40.3.5 | No new OfxSetHost-related messages in stderr / Flame log | PASS | No output diff attributable to the OfxSetHost stub |
+
+### 40.4 DaVinci Resolve Studio Regression
+
+Test date: 2026-05-25, Tester: Hiroshi
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.4.1 | Resolve Studio: loads in the Fusion Page | PASS | Verified on both the Fusion Page and the Color Page nodes |
+| 40.4.2 | Resolve Studio: basic render in the Fusion Page | PASS | Basic render successful on both the Fusion Page and the Color Page |
+
+### 40.5 macOS Host Regression (KI#26 inverse check)
+
+Fusion Studio on macOS was recorded as "already loading correctly" in the KI#26 history.  This sub-section confirms that the macOS load path is not regressed.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.5.1 | NUKE macOS arm64 / x86_64: load + basic render | | Pixel-identical to v5 |
+| 40.5.2 | Fusion Studio macOS: loads (retention of previously working path) | | Retention check for the path KI#26 recorded as already OK |
+| 40.5.3 | Resolve Studio macOS: loads + basic render in the Fusion Page | | Existing path preserved |
+
+### 40.6 Windows Host Regression
+
+Right after the MSYS2 UCRT64 toolchain migration, confirm that the `_WIN32` branch (`__declspec(dllexport)`) works correctly.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 40.6.1 | NUKE Windows: load + basic render | | Pixel-identical to v5 (Strawberry MinGW) |
+| 40.6.2 | Fusion Studio Windows: load + basic render | | Also confirms the Windows Fusion loader behavior |
+| 40.6.3 | `dumpbin /exports OpenDefocusOFX.ofx` lists OfxSetHost | | `OfxSetHost` appears alongside `OfxGetNumberOfPlugins` / `OfxGetPlugin` |
+
+### 40.7 PASS Criteria
+
+- 40.1: **all items must PASS** (evidence that Known Issue #26 is resolved)
+- 40.2: **all items must PASS** (confirms Fusion Studio Linux is now usable)
+- 40.3: **all items must PASS** (no impact on Flame / NUKE Linux — v6 release blocker)
+- 40.4: **all items must PASS** (preserves the previously working Resolve Studio path)
+- 40.5: **all items must PASS** (no regression on macOS paths)
+- 40.6: **all items must PASS** (no regression on the Windows build path)
+
+If anything in 40.3 / 40.5 / 40.6 fails, the OfxSetHost stub must be reverted or made conditional, blocking the v6 release.
+
+### 40.8 Common Prep
+
+1. Confirm the v6-dev bundle has been produced at `bundle/OpenDefocusOFX.ofx.bundle/`
+2. Install: `sudo cp -R '/path/to/bundle/OpenDefocusOFX.ofx.bundle' /usr/OFX/Plugins/` (recommend removing the existing v5 bundle first)
+3. Verify the dynamic symbol: `nm -D --defined-only /usr/OFX/Plugins/OpenDefocusOFX.ofx.bundle/Contents/Linux-x86-64/OpenDefocusOFX.ofx | grep OfxSetHost`
+4. Fusion Studio: `/opt/BlackmagicDesign/Fusion20/Fusion`
+5. NUKE / Flame: default paths
+6. DaVinci Resolve Studio: launch normally, then switch to the Fusion Page
+7. macOS / Windows rows require validation on separate environments (remote PC or hardware swap)
 
 ---
 

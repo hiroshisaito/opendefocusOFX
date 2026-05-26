@@ -41,7 +41,7 @@ static const int   kPluginVersionMajor = 0;
 static const int   kPluginVersionMinor = 1;
 
 // Development version string — update on each dev build
-static const char* kDevVersion = "v0.1.10-OFX-v5";
+static const char* kDevVersion = "v0.1.10-OFX-v6-dev";
 static const char* kParamDevVersion = "devVersion";
 
 static const char* kClipSource = kOfxImageEffectSimpleSourceClipName;
@@ -1003,6 +1003,11 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     // get_real_coordinates() computes: real_position = full_region.xy + pixel_coords
     // This must produce RoD-based screen-space positions that are consistent
     // with center (also RoD-based) for correct distance_to_screen_center.
+    // Assumes non-negative RoD origin per NUKE / Flame.  static_cast<int> on
+    // a negative double truncates toward zero, so a host that reports a
+    // negative RoD origin would drift the RoD anchor by up to 1 px.
+    // Re-validate this assumption when adding Resolve / Fusion to the host
+    // matrix.
     int rodX1 = static_cast<int>(rod.x1 * renderScale);
     int rodY1 = static_cast<int>(rod.y1 * renderScale);
 
@@ -1047,9 +1052,10 @@ void OpenDefocusPlugin::render(const OFX::RenderArguments& args) {
     }
 
     // Copy result to OFX output (fetchWindow-local → world coords).
-    // fetchWindow X may have been trimmed to cap bufWidth, so rw can extend
-    // beyond fetchWindow.  Copy the intersection; replicate edge pixels for
-    // the overscan zones that fall outside the rendered buffer.
+    // fetchWindow.x1/x2 currently equal rw.x1/x2 (no X expansion), so the
+    // left/right overscan loops are dead code under the present design.
+    // The intersection form is kept defensively: if a future change re-introduces
+    // X-axis trimming (e.g. for storage-buffer caps), these guards still work.
     int copyX1 = std::max(rw.x1, fetchWindow.x1);
     int copyX2 = std::min(rw.x2, fetchWindow.x2);
     int copyWidth = std::max(0, copyX2 - copyX1);
@@ -2172,3 +2178,40 @@ void getPluginIDs(OFX::PluginFactoryArray& ids) {
 }
 
 }} // namespace OFX::Plugin
+
+// ---------------------------------------------------------------------------
+// OfxSetHost stub — Fusion Studio (Linux standalone) compatibility
+//
+// OFX 1.5 added OfxSetHost as an *optional* C entry point.  NUKE, Flame and
+// DaVinci Resolve all tolerate its absence and call OfxPlugin::setHost (the
+// struct-member callback wired up by the C++ Support library) instead.
+//
+// Standalone Fusion Studio on Linux dlopens plugins with RTLD_NOW and then
+// dlsym-looks-up "OfxSetHost"; treating its absence as fatal it reports
+// "undefined symbol: OfxSetHost" and refuses to load the bundle (Known
+// Issue #26).  Exporting a no-op stub satisfies that check.
+//
+// Defining this does NOT change the load path on other hosts: per OFX 1.5
+// spec the host still calls OfxPlugin::setHost after OfxGetPlugin returns,
+// so the C++ Support library's host capture remains the canonical wiring.
+// kOfxStatOK signals "entry point completed normally" — the conventional
+// success return for OFX entry points.  (kOfxStatReplyDefault was avoided
+// because ofxCore.h documents it primarily for mainEntry actions, which
+// could leave room for a strict host to reject the plugin on a non-OK
+// return; external review flagged this as the only Flame-side ambiguity.)
+//
+// Note: `OfxExport` is `#define OfxExport extern` on Linux and does not
+// add visibility attributes; the bundle is built with -fvisibility=hidden,
+// so we need an explicit default-visibility attribute to actually export
+// the symbol (matching the EXPORT macro the Support library uses for
+// OfxGetNumberOfPlugins / OfxGetPlugin in ofxsImageEffect.cpp).
+// ---------------------------------------------------------------------------
+#if defined(_WIN32)
+extern "C" __declspec(dllexport) OfxStatus OfxSetHost(const OfxHost* /*host*/) {
+    return kOfxStatOK;
+}
+#else
+extern "C" __attribute__((visibility("default"))) OfxStatus OfxSetHost(const OfxHost* /*host*/) {
+    return kOfxStatOK;
+}
+#endif

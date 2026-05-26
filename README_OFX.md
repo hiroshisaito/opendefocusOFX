@@ -37,11 +37,11 @@ The following are architectural adaptations to the OFX host environment. They do
 ### Prerequisites
 
 - **CMake** 3.20+
-- **C++17** compiler (GCC 8+ on Linux / Apple Clang 14+ on macOS / MinGW-W64 GCC 13+ on Windows)
+- **C++17** compiler (GCC 8+ on Linux / Apple Clang 14+ on macOS / MSYS2 UCRT64 GCC 15.2.0 on Windows)
 - **Rust** stable (1.92+) and the nightly toolchain listed in `upstream/opendefocus/crates/spirv-cli-build/rust-toolchain.toml`
 - **OpenFX SDK** — included as a git submodule (`upstream/openfx/`)
 - **OpenDefocus** — included as a git submodule (`upstream/opendefocus/`)
-- **Windows only**: System `protoc` (e.g. `winget install Google.Protobuf`), Rust GNU toolchain (`stable-x86_64-pc-windows-gnu`)
+- **Windows only**: MSYS2 UCRT64 environment (`pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-make`), system `protoc` (e.g. `winget install Google.Protobuf`), Rust GNU toolchain (`stable-x86_64-pc-windows-gnu`)
 
 ### Dependencies
 
@@ -67,13 +67,20 @@ cmake ../plugin/OpenDefocusOFX -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-#### Windows (MinGW)
+#### Windows (MSYS2 UCRT64)
+
+Run from the MSYS2 UCRT64 shell (or any shell with `C:\msys64\ucrt64\bin` in PATH):
 
 ```bash
 mkdir -p build && cd build
 cmake ../plugin/OpenDefocusOFX -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-mingw32-make -j%NUMBER_OF_PROCESSORS%
+mingw32-make -j$NUMBER_OF_PROCESSORS
 ```
+
+The Windows build statically links libgcc / libstdc++ / libwinpthread, so the
+resulting `.ofx` has no third-party DLL dependencies. Only Windows 10/11 system
+libraries are imported — the bundle can be deployed to host machines without
+installing MSYS2.
 
 The built plugin is automatically copied to the bundle directory:
 ```
@@ -172,9 +179,9 @@ The following issues originate from the OpenDefocus Rust core and affect both ND
 
 | # | Issue | Status | Detail |
 |---|-------|--------|--------|
-| 26 | Plugin load error in Fusion Studio (standalone) — Linux only | DEFERRED | Fusion Studio on **Linux** rejects the plugin before OFX entry points are called. **macOS (Intel) loads successfully.** DaVinci Resolve loads successfully on all platforms. OpenGL link (`libGL`) fixed for dlopen compatibility. Panic protection (`catch_unwind`) added to Rust FFI boundary. Linux-specific root cause under investigation (scanner cache or proprietary pre-validation). Not a primary target host |
+| 26 | Plugin load error in Fusion Studio (standalone) — Linux only | RESOLVED (Linux, v6) | Two-stage fix in v0.1.10-OFX-v6: (1) exported a no-op `OfxSetHost` stub returning `kOfxStatOK` (OFX 1.5 spec optional entry point that Fusion's loader treated as fatal-on-absence); (2) added `CXX_VISIBILITY_PRESET hidden` to the OFX Support static library and a linker version script (`OpenDefocusOFX.exports`) that whitelists only the three OFX entry points, dropping the bundle's dynamic export count from 2725 to 3 (matching the export profile Fusion's loader accepts). macOS / Windows verification pending. Verified on Linux: Fusion Studio loads and renders normally; NUKE / Flame / DaVinci Resolve Studio (Fusion Page + Color Page) pixel-identical to v5 |
 
-**BMD Fusion / DaVinci Resolve is not recommended for production use.** UAT has not been completed for these hosts, and performance characteristics (GPU/CPU rendering speed, GUI responsiveness) have not been validated. Use NUKE or Flame for production workflows.
+**Status update (v0.1.10-OFX-v6):** Fusion Studio on **Linux** now loads and renders correctly (UAT 40.1 + 40.2 PASS).  UAT for **macOS** and **Windows** standalone Fusion Studio is pending, and full performance characteristics still warrant validation before recommending Fusion / DaVinci Resolve as primary production hosts.  Use NUKE or Flame for primary production workflows; Fusion / Resolve are now usable on Linux for compositing tasks.
 
 ### Flame: Known Limitations
 
