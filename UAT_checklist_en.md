@@ -823,6 +823,152 @@ If anything in 40.3 / 40.5 / 40.6 fails, the OfxSetHost stub must be reverted or
 
 ---
 
+## 41. v0.1.10-OFX-v6-dev macOS UAT — Flame 2026 (consolidated regression: KI#26 + FFI panic protection + toolchain spot)
+
+Test environment: macOS 15.7 (Sequoia), **Intel x86_64**; Flame 2026.2.1 Build 2026.2.1.190.
+
+**Scope:**
+Consolidated macOS spot-check covering the three v6-dev concern axes against a single reference host (Flame 2026 macOS).  Provides macOS-side evidence for §38 (FFI panic protection), §39.4.2 (Windows-toolchain change has no impact on the macOS build), and §40.5 (KI#26 inverse regression on a macOS host).  Does not substitute for the NUKE / Fusion Studio / Resolve Studio macOS coverage required by §40.5.1 / 40.5.2 / 40.5.3 individually.
+
+**Build identity (executed bundle on this host):**
+
+| Field | Value |
+|-------|-------|
+| Git HEAD | `3b15317` (clean tree, 2 commits ahead of origin/master) |
+| Bundle | `/Library/OFX/Plugins/OpenDefocusOFX.ofx.bundle/` |
+| arm64 .ofx | 8,172,032 bytes, Mach-O 64-bit bundle arm64, sha256 `c5b9f6cafc33cb6ff68a14eca7ca2e9b3c682a61d6f222796c7f4a529dd40384` — built but **not runtime-tested** (no Apple Silicon machine available; Phase E precedent) |
+| x86_64 .ofx | 8,572,984 bytes, Mach-O 64-bit bundle x86_64, sha256 `50ee888149c97b1d689ac28a5f93c0694fd2b05543e95a71b4c6d7dd464fb35a` — runtime-tested on Flame 2026 macOS |
+| OFX entry exports (both) | `_OfxGetNumberOfPlugins`, `_OfxGetPlugin`, `_OfxSetHost` ✅ |
+| Build toolchain | Apple Clang 17.0.0 + Rust stable 1.94 (host: stable-x86_64-apple-darwin) + nightly-2025-06-30 |
+| Test date | 2026-05-26 |
+| Tester | Hiroshi |
+
+### 41.1 Plugin Load & Health Check
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 41.1.1 | Plugin appears in OFX menu | PASS | Flame Batch / BatchFX → OFX → Defocus → OpenDefocusOFX |
+| 41.1.2 | kDevVersion display = `v0.1.10-OFX-v6-dev` | PASS | Confirmed in Controls panel (screenshot captured); stderr also shows `[OpenDefocusOFX] describe(), plugin: v0.1.10-OFX-v6-dev` |
+| 41.1.3 | No error logs on load | PASS | No `caught panic` / no `ERROR` from `opendefocus_ofx_bridge`. Unrelated noise (PySide2 hooks, `Cannot get the current Project` from logik_portal) is Flame Python-side, not OpenDefocusOFX |
+
+### 41.2 Basic Rendering
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 41.2.1 | 2D mode basic render (Size=50, no Depth) | PASS | |
+| 41.2.2 | Depth mode basic render (Depth connected, Use Focus Plane) | PASS | Use Focus Point also operative on Flame macOS (not subject to the NUKE macOS `#ifdef __APPLE__` mitigation) |
+| 41.2.3 | UHD GPU render (3840×2160) | PASS | Stripe traversal seamless |
+
+### 41.3 GPU / CPU Toggle (HIGH#1 + LOW#2 path)
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 41.3.1 | UseGPU on → off → on cycle (executed 2 round trips) | PASS | Stderr trace: `Renderer recreated: CPU` @ 06:24:45, `Renderer recreated: GPU` @ 06:25:04, `Renderer recreated: CPU` @ 06:26:14, `Renderer recreated: GPU` @ 06:26:28. Output correct after each toggle |
+| 41.3.2 | No watch-out logs (§38.9) | PASS | No `caught panic during ...` / `GPU stripe render panicked` / `od_render: caught panic during CPU fallback renderer creation` across the entire session — HIGH#1 / HIGH#2 / LOW#1 / LOW#2 paths all silent (= correctly inert, no panic to catch) |
+
+### 41.4 Parallel Instance Rendering
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 41.4.1 | Four parallel OpenDefocusOFX nodes in the same Batch graph | PASS | Exceeds the 2-instance baseline of §38.7.1.  All four render independently with no cross-contamination |
+
+### 41.5 Lazy Initialization
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 41.5.1 | Lazy init fires only on the first render per instance | PASS | Stderr shows `Lazy-initializing renderer (GPU=true)` → `Renderer created: GPU` at the first render of each instance.  Node creation itself is instant (no wgpu probe at construction) |
+
+### 41.6 Stability
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 41.6.1 | No crash on Flame quit | PASS | `od_destroy()` runs cleanly; no destruction-order issues |
+
+### 41.7 PASS Criteria
+
+All of 41.1 – 41.6 must PASS.  Watch-out log occurrence holds the verdict.
+
+### 41.8 Coverage Mapping
+
+| Existing item | Covered by §41 (Flame macOS) | Still pending |
+|---|---|---|
+| §38.1.x – §38.8.x (Linux ref) | Effectively cross-validated on macOS Flame: lazy init (38.2), HD/UHD GPU render (38.3), GPU↔CPU toggle (38.4), watch-out logs (38.9) — all clear | §38 was originally specified on Linux; that primary coverage remains required |
+| §39.4.2 macOS Intel toolchain spot-check | PASS — Windows toolchain change confined to `elseif(WIN32)` branch; macOS build path unchanged and behaves identically to v5 on Flame macOS | — |
+| §40.5.1 NUKE macOS (arm64 / x86_64) | x86_64 partially covered indirectly (same bundle binary); arm64 not runtime-tested | NUKE macOS x86_64 + arm64 load + basic render (KI#26 inverse check) |
+| §40.5.2 Fusion Studio macOS | Not covered | Fusion Studio macOS load + retention check |
+| §40.5.3 Resolve Studio macOS | Not covered | Resolve Studio macOS Fusion Page load + basic render |
+
+### 41.9 arm64 Status
+
+Per Phase E precedent (Mar 19 2026 verdict), arm64 ships as **cross-compile success only** for this UAT cycle.  Runtime verification is deferred until an Apple Silicon machine becomes available.  Mach-O `file` identification, OFX entry-point exports, and kDevVersion string are confirmed on the arm64 binary; rendering behavior is not.
+
+---
+
+## 42. v0.1.10-OFX-v6-dev macOS UAT — NUKE 16.0v6 (simplified, §40.5.1 x86_64 coverage)
+
+Test environment: macOS 15.7 (Sequoia), Intel x86_64; NUKE 16.0v6.
+
+**Scope:** §40.5.1 NUKE macOS x86_64 release-blocker — load + basic render + KI#24 mitigation retention check.  Uses the same `MacOS-x86-64/OpenDefocusOFX.ofx` (sha256 `50ee8881…`) as §41 Flame.  arm64 runtime is N/A per §41.9.
+
+Test date: 2026-05-26, Tester: Hiroshi.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 42.1.1 | OpenDefocusOFX appears in NUKE Node menu | PASS | |
+| 42.1.2 | Node creation succeeds (no crash) | PASS | |
+| 42.1.3 | kDevVersion display = `v0.1.10-OFX-v6-dev` | PASS | |
+| 42.2.1 | 2D mode basic render (Size=50) | PASS | |
+| 42.2.2 | Use Focus Point / Focus Point XY parameters hidden on NUKE macOS (Known Issue #24 mitigation retained) | PASS | Confirms `#ifdef __APPLE__` + `isNuke` guard still active in v6-dev (no regression of the v3-era crash mitigation) |
+| 42.3.1 | No crash on NUKE quit | PASS | |
+
+**Additional coverage (beyond simplified scope, captured during the session):**
+- **CPU/GPU toggle confirmed** — cross-validates §38.4 / §41.3 on NUKE macOS.
+- **GPU + Depth mode 20-frame batch render confirmed** — cross-validates §38.3.2 / §38.3.3 (UHD-class multi-frame GPU rendering) on NUKE macOS.
+
+### 42.7 PASS Criteria
+
+All of 42.1 – 42.3 must PASS.  Additional-coverage items are reported separately and do not gate the verdict.
+
+---
+
+## 43. v0.1.10-OFX-v6-dev macOS UAT — Fusion Studio 20 (simplified, §40.5.2 coverage)
+
+Test environment: macOS 15.7 (Sequoia), Intel x86_64; Blackmagic Fusion Studio 20 (standalone).
+
+**Scope:** §40.5.2 Fusion Studio macOS release-blocker — load + basic render.  Confirms the KI#26 fix (the `OfxSetHost` stub + `__attribute__((visibility("default")))` + the OFX Support `CXX_VISIBILITY_PRESET hidden` change applied via `OfxSupport` target) does not regress the macOS Fusion Studio load path, which §40.5 recorded as "already loading correctly" pre-v6.  Uses the same `MacOS-x86-64/OpenDefocusOFX.ofx` (sha256 `50ee8881…`) as §41 / §42.
+
+Test date: 2026-05-26, Tester: Hiroshi.
+
+| # | Item | Result | Notes |
+|---|------|--------|-------|
+| 43.1.1 | Plugin appears in Fusion's OpenFX tool list (no load-error dialog) | PASS | KI#26 macOS Fusion retention confirmed — the visibility-narrowing fix did not regress the previously-working macOS load path |
+| 43.1.2 | Node creation succeeds | PASS | |
+| 43.1.3 | kDevVersion display = `v0.1.10-OFX-v6-dev` | PASS | |
+| 43.2.1 | 2D mode basic render (Size=50) | PASS | |
+| 43.3.1 | No crash on Fusion quit | PASS | |
+
+### 43.7 PASS Criteria
+
+All of 43.1 – 43.3 must PASS.
+
+---
+
+## §40.5 Coverage Roll-up (macOS host regression for KI#26)
+
+Per the §40.5 plan, macOS host coverage for the KI#26 fix requires NUKE macOS arm64 / x86_64, Fusion Studio macOS, and Resolve Studio macOS to load and basic-render without regression.  As of 2026-05-26 the status is:
+
+| §40.5 row | Status | Evidence |
+|-----------|--------|----------|
+| 40.5.1 NUKE macOS x86_64 | ✅ PASS | §42 (this UAT, NUKE 16.0v6) |
+| 40.5.1 NUKE macOS arm64 | ⏳ N/A (cross-compile only) | §41.9 (no Apple Silicon machine; Phase E precedent) |
+| 40.5.2 Fusion Studio macOS | ✅ PASS | §43 (this UAT, Fusion Studio 20) |
+| 40.5.3 Resolve Studio macOS | ⏳ pending | DaVinci Resolve macOS Fusion Page load + basic render still uncovered |
+| (additional) Flame 2026 macOS | ✅ PASS (11/11) | §41 (consolidated regression on macOS Flame 2026.2.1) |
+
+Three of four host families verified on macOS Intel; arm64 awaits Apple Silicon hardware; Resolve macOS remains outstanding.  The §41 Flame macOS coverage also indirectly validates §38 (FFI panic protection) and §39.4.2 (Windows-toolchain change has no macOS impact) on the macOS code path.
+
+---
+
 ## FAIL Item Summary (Phase 2 UAT)
 
 | # | Item | Category | Status |

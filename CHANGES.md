@@ -21,7 +21,9 @@
   - **Stage 2 — visibility leak fix.** Stage 1 alone was insufficient: Fusion's loader also rejected the bundle on a second, silent grounds.  The `.ofx` was leaking ~2700 symbols (OFX Support library `OFX::*`, libstdc++ `std::__cxx11::*`, and the Rust FFI bridge's `od_*` exports) because (a) the OFX Support static library was compiled without `-fvisibility=hidden`, and (b) Rust `extern "C"` exports default to public visibility.  Two changes restore parity with plugins Fusion already accepts (smooth.ofx exports only 3 symbols):
     - `CXX_VISIBILITY_PRESET hidden` added to the `OfxSupport` static-library target.
     - A linker version script (`plugin/OpenDefocusOFX/OpenDefocusOFX.exports`) is wired into the Linux link line; only `OfxGetNumberOfPlugins`, `OfxGetPlugin`, and `OfxSetHost` remain in the dynamic symbol table.  Windows PE/COFF only exports `__declspec(dllexport)` symbols by default, so no version script is needed there.
-  - **Verified on Linux**: Fusion Studio loads + renders normally; NUKE, Flame, and DaVinci Resolve Studio (Fusion Page + Color Page) are pixel-identical to v5.  macOS and Windows hosts remain to be UAT'd on the respective platforms before the v6 release.
+  - **Verified on Linux**: Fusion Studio loads + renders normally; NUKE, Flame, and DaVinci Resolve Studio (Fusion Page + Color Page) are pixel-identical to v5.
+  - **Verified on Windows (2026-05-26, §39 9/9 PASS)**: NUKE 16 + Fusion Studio 20 on a clean Windows 11 PC, MSYS2 UCRT64 GCC 15.2.0 build.
+  - **Verified on macOS (2026-05-26)**: Flame 2026.2.1 (§41 11/11 PASS), NUKE 16.0v6 (§42 6/6 PASS + CPU/GPU toggle + GPU+Depth 20-frame batch), and Fusion Studio 20 (§43 5/5 PASS — KI#26 macOS Fusion retention confirmed) on macOS 15.7 Intel x86_64.  DaVinci Resolve Studio macOS (§40.5.3) still pending; arm64 ships cross-compile-only (Phase E precedent — no Apple Silicon machine available).
   - **Bundle export profile**: 2725 → 3 dynamic `T` exports; binary size −370 KB from removed export metadata.
 
 ### Documentation

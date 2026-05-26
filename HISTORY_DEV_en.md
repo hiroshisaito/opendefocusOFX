@@ -2417,6 +2417,59 @@ The version script trumps any visibility attribute on static-library symbols, so
 
 `v0.1.10-OFX-v6-dev`
 
+### 2026-05-26: macOS UAT — Section 41 Flame 2026 (consolidated v6-dev regression) — 11/11 PASS
+
+macOS manual UAT against Flame 2026.2.1 on Intel x86_64 covering KI#26 inverse regression (§40.5 macOS arm) + FFI panic protection (§38) + Windows-toolchain spot-check (§39.4.2) in a single host pass.  All 11 items PASS; arm64 ships as cross-compile only (Phase E precedent — no Apple Silicon machine).
+
+**Build identity:**
+- Git HEAD: `3b15317` (clean tree)
+- arm64 .ofx: 8,172,032 bytes, Mach-O 64-bit bundle arm64, sha256 `c5b9f6cafc33cb6ff68a14eca7ca2e9b3c682a61d6f222796c7f4a529dd40384`
+- x86_64 .ofx: 8,572,984 bytes, Mach-O 64-bit bundle x86_64, sha256 `50ee888149c97b1d689ac28a5f93c0694fd2b05543e95a71b4c6d7dd464fb35a`
+- Both arches export exactly `_OfxGetNumberOfPlugins` / `_OfxGetPlugin` / `_OfxSetHost` as `T` entries
+- kDevVersion: `v0.1.10-OFX-v6-dev` (verified via `strings` and via Flame Controls panel)
+
+**Test environment:**
+- Host: macOS 15.7 Sequoia, Intel x86_64
+- App: Flame 2026.2.1 Build 2026.2.1.190
+- Bundle install path: `/Library/OFX/Plugins/OpenDefocusOFX.ofx.bundle/`
+
+**Results (all PASS, 2026-05-26):**
+- **41.1 Plugin Load & Health Check (3/3)**: appears in OFX Defocus menu; kDevVersion display `v0.1.10-OFX-v6-dev`; stderr clean (no `caught panic`, no `ERROR`).
+- **41.2 Basic Rendering (3/3)**: 2D mode (Size=50), Depth mode with Use Focus Plane (Focus Point operative on Flame macOS — not subject to the NUKE-only `#ifdef __APPLE__` mitigation), UHD GPU (3840×2160) seamless across stripes.
+- **41.3 GPU/CPU Toggle (2/2)**: 2 round trips of UseGPU on→off→on logged as `Renderer recreated: CPU` / `Renderer recreated: GPU`; no watch-out logs (HIGH#1 / HIGH#2 / LOW#1 / LOW#2 paths all silent — correctly inert).
+- **41.4 Parallel Instance Rendering (1/1)**: four parallel OpenDefocusOFX nodes in one Batch graph (exceeds the §38.7.1 2-instance baseline) with no cross-contamination.
+- **41.5 Lazy Initialization (1/1)**: lazy init fires only at first render per instance; node creation is instant.
+- **41.6 Stability (1/1)**: no crash on Flame quit.
+
+**v6 release-blocker progress:**
+- ✅ Linux: §40.1 – §40.4 PASS (2026-05-25)
+- ✅ Windows: §39.1 – §39.3 9/9 PASS (2026-05-26)
+- ✅ macOS Flame 2026: §41 11/11 PASS (this entry)
+- ✅ macOS NUKE 16.0v6 (§42, x86_64): 6/6 PASS + CPU/GPU toggle + GPU+Depth 20-frame batch
+- ✅ macOS Fusion Studio 20 (§43): 5/5 PASS (KI#26 macOS Fusion retention confirmed)
+- ⏳ macOS DaVinci Resolve Studio (§40.5.3): still pending
+- ⏳ macOS arm64 runtime: N/A (cross-compile only; awaits Apple Silicon hardware)
+- ⏳ Linux Rocky 9.5 spot-check (§39.4.1): still pending
+
+### 2026-05-26: macOS UAT — Sections 42 + 43 (NUKE 16.0v6 + Fusion Studio 20) — 11/11 PASS combined
+
+Follow-on simplified UAT to close out §40.5.1 (NUKE macOS x86_64) and §40.5.2 (Fusion Studio macOS) release blockers using the same `MacOS-x86-64/OpenDefocusOFX.ofx` binary (sha256 `50ee888149c97b1d689ac28a5f93c0694fd2b05543e95a71b4c6d7dd464fb35a`) as §41.
+
+**§42 NUKE 16.0v6 macOS (Intel x86_64) — 6/6 PASS:**
+- 42.1.1 menu entry, 42.1.2 node creation, 42.1.3 kDevVersion display
+- 42.2.1 2D mode basic render
+- 42.2.2 Use Focus Point / Focus Point XY parameters hidden on NUKE macOS (KI#24 `#ifdef __APPLE__` + `isNuke` mitigation retained in v6-dev)
+- 42.3.1 no crash on NUKE quit
+- **Additional (beyond simplified scope)**: CPU/GPU toggle confirmed; GPU + Depth mode 20-frame batch render confirmed — cross-validates §38.4 / §38.3.2 / §38.3.3 on NUKE macOS
+
+**§43 Fusion Studio 20 macOS — 5/5 PASS:**
+- 43.1.1 plugin appears in OpenFX tool list with no load-error dialog (KI#26 macOS Fusion retention confirmed)
+- 43.1.2 node creation, 43.1.3 kDevVersion display
+- 43.2.1 2D mode basic render
+- 43.3.1 no crash on Fusion quit
+
+**§40.5 macOS roll-up:** 3 of 4 host families verified (NUKE, Fusion, Flame); arm64 awaits Apple Silicon; Resolve macOS remains outstanding.
+
 ### 2026-05-26: Windows UAT — Section 39 (MSYS2 UCRT64 + Static Runtime) — 9/9 PASS
 
 Windows manual UAT completed for the v6-dev toolchain migration and static runtime linking.  All nine Windows-side items pass; 39.4 cross-OS spot-checks remain.
