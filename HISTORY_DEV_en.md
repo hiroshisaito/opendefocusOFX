@@ -1988,7 +1988,7 @@ Code review identified two performance/correctness issues unrelated to the coord
 | 3 | Bokeh Noise feature flag disabled | apply_noise() stubbed out |
 | 4 | Axial Aberration enum off-by-one | Protobuf 0,1,2 vs Rust 1,2,3 |
 | 5 | NDK/OFX ~1px pixel drift | OFX standard coordinate system compliance; imperceptible at 2K+ |
-| 6 | CPU/GPU ~1px pixel drift | Minor rendering difference between CPU and GPU backends |
+| 6 | CPU/GPU pixel drift = 0.5 px/axis (measured v6) | Upstream texel-center omission; GPU grid +0.5 px vs CPU. See 2026-05-31 entry |
 | 18 | Catseye enable check missing | calculate_catseye() unconditional in non_uniform.rs |
 | 19 | Axial Aberration flag misreference | Checks BARNDOORS_ENABLED instead of correct flag (copy-paste in internal_settings.rs) |
 | 23 | ChunkHandler vertical seam >4096px | Hardcoded limit=4096, splits horizontally, chunk boundary produces visible seam |
@@ -2511,6 +2511,57 @@ The v6-dev UAT bundles were rebuilt against the final `v0.1.10-OFX-v6` kDevVersi
 - §40.5.3 (Resolve Studio macOS Fusion Page) — still pending; existing macOS Resolve path was working pre-v6 (KI#26 record), so this is retention check only.
 - BMD upstream bug report for OFX 1.5 `OfxSetHost` spec compliance — status: not yet filed.
 - KI#27 candidate sweep for other Fusion Studio Linux fatal-on-absence optional OFX symbols.
+
+### 2026-05-31: KI#6 CPU/GPU Pixel Drift — Root Cause Found + Measured
+
+Re-investigated the long-standing KI#6 (DEFERRED since v1) on the v6 build. A
+25-agent code-analysis workflow over the upstream crates plus an empirical
+impulse-PSF measurement in NUKE and Flame pinned the cause exactly and gave a
+hard number. **Disposition unchanged (DEFERRED, upstream) — but now with a
+precise magnitude and proof the OFX port is not at fault.**
+
+**Root cause (shared kernel, both backends compiled from the same source):**
+integer pixel coordinates are normalized as `coords / resolution` with **no
+`+0.5` texel-center term** (`opendefocus-kernel/src/lib.rs:63`,
+`stages/ring.rs:179-180`). The GPU's Vulkan hardware sampler interprets the
+normalized value with the texel-center convention (+0.5), while the CPU path
+(`opendefocus-shared/src/cpu_image.rs:85`) denormalizes via
+`(coords * resolution).clamp(...)` without `+0.5` and hands integer-aligned
+coordinates to the `image` crate's `interpolate_bilinear`. The two backends
+therefore bilerp neighbor texel pairs offset by one texel → a clean 0.5 px
+relative grid shift.
+
+**Measurement (impulse single bright pixel, 2D mode, centroid of the defocus
+PSF; see `references/ki6_drift_measurement/`):**
+
+| test | result |
+|------|--------|
+| Test 1 (Size 30, NUKE) | drift +0.5 px/axis, 0.708 px diagonal; CPU centroid lands **exactly** on the integer pixel (512.000), GPU on **+0.5** (512.500). Phase-correlation cross-check agrees within 0.005 px |
+| Test 2 (Size 8 / 30 / 80) | 0.707 / 0.708 / 0.707 px — **constant across a 10× Size range** → fixed sampling-grid shift, not blur-dependent |
+| NDK comparison | NDK plugin shows the same 0.707 px GPU/CPU drift; OFX vs NDK is **0.000 px (CPU, bit-identical)** and **0.001 px (GPU)** per backend |
+| Test 6 (Flame) | Flame GPU/CPU drift 0.708 px; NUKE vs Flame agree within 0.002 px per backend → **host-independent** |
+
+**Conclusions:**
+- Magnitude is **0.5 px per axis (0.71 px diagonal)**, constant, Size- and
+  host-independent. The historical "~1px" was an over-estimate; 0.5 px/axis is
+  the measured truth.
+- The OFX wrapper is **exonerated**: it issues one `od_render()` with identical
+  `RenderSpecs` to both backends, and OFX output equals the NDK plugin to
+  <0.001 px per backend. The drift is 100% inside the shared upstream core.
+- **Not OFX-fixable** without editing upstream (the `+0.5` belongs in the
+  kernel's coordinate normalization / `cpu_image.rs`). Per the
+  no-upstream-modification porting policy → **KEEP DEFERRED**, now documented
+  with the exact magnitude.
+- Eligible for an upstream report to codeberg.org/gillesvink/opendefocus
+  (reporting allowed, patching not): the fix is a `+0.5` texel-center term in
+  the CPU denormalization to match the GPU sampler.
+
+Toolkit (local, gitignored under `references/ki6_drift_measurement/`):
+`gen_test_images.py` (impulse/grid/edge/checker/depth sources),
+`analyze_drift.py` (centroid / phasecorr / edge / grid / stats), `_img.py`
+(EXR via OpenImageIO/imageio/OpenEXR + a built-in pure-python float-TIFF
+reader/writer that handles NUKE's deflate multi-strip TIFF), and
+`MEASUREMENT_RESULT.md`.
 
 ### Current Status
 
