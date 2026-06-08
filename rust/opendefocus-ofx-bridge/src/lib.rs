@@ -1196,7 +1196,7 @@ pub unsafe extern "C" fn od_render(
 
     // If GPU previously failed, recreate as CPU-only before attempting render.
     // wgpu CPU-adapter creation is unlikely to panic, but wrap in catch_unwind
-    // for symmetry with the other renderer-creation sites (HIGH #1 / #2).
+    // for symmetry with the other renderer-creation sites.
     if inst.gpu_failed && inst.renderer.as_ref().map_or(false, |r| r.is_gpu()) {
         log::info!("GPU previously failed, recreating renderer as CPU-only");
         let mut cpu_settings = inst.settings.clone();
@@ -1422,7 +1422,7 @@ pub unsafe extern "C" fn od_render(
                 inst.gpu_failed = true;
 
                 // Create CPU renderer (wrap in catch_unwind for symmetry with
-                // the GPU probe sites — CPU adapter creation rarely panics but
+                // the other renderer-creation sites — CPU adapter creation rarely panics but
                 // a stray panic here would otherwise cross the FFI boundary).
                 let mut cpu_settings = inst.settings.clone();
                 cpu_settings.render.use_gpu_if_available = false;

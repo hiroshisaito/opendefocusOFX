@@ -16,7 +16,7 @@ log = "0.4"
 env_logger = "0.11"
 
 # On non-Windows, use vendored protoc (protobuf-src) so no system protoc is needed.
-# On Windows (MinGW), protobuf-src fails to build, so system protoc is used instead
+# On Windows (MSYS2 UCRT64), protobuf-src fails to build, so system protoc is used instead
 # (set PROTOC env var or ensure protoc is in PATH).
 [target.'cfg(not(windows))'.dependencies]
 opendefocus = { path = "../../upstream/opendefocus/crates/opendefocus", default-features = false, features = ["protobuf-vendored"] }

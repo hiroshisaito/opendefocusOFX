@@ -1,5 +1,5 @@
 // OpenDefocus OFX Plugin
-// v0.1.10-OFX (see kDevVersion for current build version)
+// v0.1.10-OFX port (build revision: see kDevVersion)
 //
 // Porting of OpenDefocus (Nuke NDK) to OpenFX standard.
 // This plugin calls into the OpenDefocus Rust core via extern "C" FFI bridge.
