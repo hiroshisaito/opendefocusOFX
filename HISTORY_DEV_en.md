@@ -1993,6 +1993,7 @@ Code review identified two performance/correctness issues unrelated to the coord
 | 19 | Axial Aberration flag misreference | Checks BARNDOORS_ENABLED instead of correct flag (copy-paste in internal_settings.rs) |
 | 23 | ChunkHandler vertical seam >4096px | Hardcoded limit=4096, splits horizontally, chunk boundary produces visible seam |
 | 25 | Depth map edge in foreground bokeh | No depth smoothing before kernel; bilateral sampling preserves discontinuities |
+| 27 | Depth-mode scanline displacement on sparse high-contrast features | Upstream kernel convolution writes a sparse in-focus row to the wrong output row under the large Depth-mode buffer margin. Dense/real footage unaffected. See 2026-06-21 entry |
 
 ### 2026-03-26: Fusion Studio Compatibility Investigation (Known Issue #26)
 
@@ -2562,6 +2563,49 @@ Toolkit (local, gitignored under `references/ki6_drift_measurement/`):
 (EXR via OpenImageIO/imageio/OpenEXR + a built-in pure-python float-TIFF
 reader/writer that handles NUKE's deflate multi-strip TIFF), and
 `MEASUREMENT_RESULT.md`.
+
+### 2026-06-21: KI#27 — Depth-Mode Scanline Displacement (upstream, sparse-input only)
+
+A tester reported that a 256×256 grid of single-pixel dots defocused in Depth
+mode (CPU, size 2, focal 1.0, 1/Z) loses one scanline (e.g. output row 79) and
+deposits its content ~128 px away. Investigated to root cause; **disposition:
+DEFERRED (upstream) — real/dense footage is unaffected.**
+
+Evidence chain:
+- **Not depth=0 / 1-over-Z infinity**: reproduces with a clean finite depth ramp
+  (min 0.333, no zeros / non-finite). The earlier inf-cast hypothesis is refuted.
+- **Depth-mode only**: 2D mode is clean. The real trigger is the Depth-mode
+  buffer margin — `margin = ceil(max(size,maxSize))+1` (= 11 for maxSize=10) vs
+  `ceil(size)+1` (= 3) in 2D — which makes the processing buffer taller than the
+  declared resolution.
+- **Margin/alignment dependent**: a deterministic local harness
+  (`references/depth_displacement_bug/`, calls the public `od_*` FFI, no Nuke)
+  reproduces it; a margin sweep shows it is intermittent (margins 5/11/12 lose a
+  row; 3/7/9/10/13 clean) and the lost row tracks margin↔feature alignment.
+- **In the upstream kernel convolution, not our bridge**: stage instrumentation
+  showed the input to `runner.convolve` is correct (the dot row present) while
+  the convolve OUTPUT already has the row displaced — so the bridge's
+  copy-render-region is innocent. Localized to
+  `opendefocus-kernel::global_entrypoint` / `write_texture` coordinate handling
+  (bounds-check vs `full_region.y`/`resolution`/`coords` when the buffer is
+  taller than the resolution).
+- **Not OFX-fixable**: resolution-match, removing the bridge ±2 render_region
+  padding, and a non-negative (zero-based) `full_region.y` coordinate scheme
+  were all tested — none avoid it.
+- **Real footage unaffected**: dense content (every row populated) with a depth
+  ramp renders correctly (only a ~0.07 edge delta at the last row). The bug
+  requires Y-sparse high-contrast in-focus features.
+- **NDK**: shows a *different* anomaly on the same pathological input (global
+  over-blur, only one sharp row), both anomalies clustering near the same row —
+  consistent with a shared upstream-kernel sensitivity driven differently by the
+  two hosts' striping.
+
+Cause (for an upstream report): the kernel's per-thread output write index /
+bounds handling is inconsistent when the processing buffer height exceeds the
+declared `resolution` and `full_region.y` is offset, so certain rows' convolved
+output land on the wrong row (and the source row is suppressed via alpha=1).
+Fix belongs upstream (kernel coordinate handling); no OFX-side workaround found.
+Deterministic repro preserved at `references/depth_displacement_bug/repro_depth.rs`.
 
 ### Current Status
 
